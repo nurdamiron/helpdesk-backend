@@ -14,7 +14,7 @@ const sendVerificationEmail = async (email, verificationToken) => {
     const mailOptions = {
         from: process.env.EMAIL_USER,
         to: email,
-        subject: 'Подтвердите ваш email для Biz360',
+        subject: 'Подтвердите ваш email для Helpdesk',
         html: `
             <!DOCTYPE html>
             <html>
@@ -72,12 +72,12 @@ const sendVerificationEmail = async (email, verificationToken) => {
             <body>
                 <div class="container">
                     <div class="header">
-                        <div class="logo">Biz360</div>
+                        <div class="logo">Helpdesk</div>
                         <h1>Добро пожаловать!</h1>
                     </div>
                     <div class="content">
                         <h2>Подтвердите ваш email</h2>
-                        <p>Спасибо за регистрацию в Biz360 - вашей интеллектуальной платформе для анализа бизнеса.</p>
+                        <p>Спасибо за регистрацию в Helpdesk - вашей интеллектуальной платформе для службы поддержки.</p>
                         <p>Для завершения регистрации и активации вашего аккаунта, пожалуйста, нажмите на кнопку ниже:</p>
                         
                         <a href="${verificationUrl}" class="button">Подтвердить email</a>
@@ -85,13 +85,13 @@ const sendVerificationEmail = async (email, verificationToken) => {
                         <p>Если кнопка не работает, вы можете скопировать и вставить следующую ссылку в ваш браузер:</p>
                         <p style="color:rgb(117, 182, 248);">${verificationUrl}</p>
                         
-                        <p>Если вы не регистрировались на Biz360, просто проигнорируйте это письмо.</p>
+                        <p>Если вы не регистрировались на Helpdesk, просто проигнорируйте это письмо.</p>
                         <p>Обратите внимание, что ссылка действительна в течение 24 часов.</p>
 
                     </div>
                     <div class="footer">
                         <p>Это автоматическое сообщение, пожалуйста, не отвечайте на него.</p>
-                        <p>© 2025 Biz360. Все права защищены.</p>
+                        <p>© 2025 Helpdesk. Все права защищены.</p>
                     </div>
                 </div>
             </body>
