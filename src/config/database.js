@@ -23,15 +23,15 @@ const testConnection = async () => {
         
         // Проверяем существование таблицы customers 
         const [tables] = await connection.query(
-            'SHOW TABLES LIKE "customers"'
+            'SHOW TABLES LIKE "tickets"'
         );
         
         if (tables.length > 0) {
-            console.log('Table customers exists');
+            console.log('Table tickets exists');
             
             // Проверяем структуру таблицы
             const [columns] = await connection.query(
-                'SHOW COLUMNS FROM customers'
+                'SHOW COLUMNS FROM tickets'
             );
             console.log('Table structure:', columns.map(col => col.Field));
         } else {

@@ -1,6 +1,6 @@
 module.exports = {
     apps: [{
-      name: "biz360-backend",
+      name: "helpdesk-backend",
       script: "src/index.js",
       env: {
         NODE_ENV: "production",
