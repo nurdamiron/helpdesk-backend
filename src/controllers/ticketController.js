@@ -1,3 +1,4 @@
+// src/controllers/ticketController.js
 const pool = require('../config/database');
 
 // Создание нового тикета

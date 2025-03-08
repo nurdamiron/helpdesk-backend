@@ -1,3 +1,4 @@
+// src/controllers/chatController.js
 const pool = require('../config/database');
 
 // Получение данных для чата (контакты, беседы, конкретная беседа)
