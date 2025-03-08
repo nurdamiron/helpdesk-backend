@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
 require('dotenv').config();
-
+const pool = require('./config/database');
 // Импорт маршрутов
 const authRoutes = require('./routes/authRoutes');
 const employeeRoutes = require('./routes/employeeRoutes');
@@ -19,6 +19,7 @@ const app = express();
 // CORS Configuration
 const whitelist = [
   'http://localhost:5000',
+  'http://localhost:3000',
   'http://localhost:3030',
   'https://biz360-sepia.vercel.app',
   'https://biz360.vercel.app',
@@ -143,15 +144,29 @@ app.get('/', (req, res) => {
 });
 
 // Health Check endpoint
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV,
-    uptime: process.uptime(),
-    memory: process.memoryUsage(),
-    cpu: process.cpuUsage()
-  });
+// Add a more robust health check endpoint
+// Добавьте этот код в index.js, ПЕРЕД подключением всех маршрутов
+app.get('/health', async (req, res) => {
+  try {
+    // Попробуем выполнить простой запрос к базе данных
+    const connection = await pool.getConnection();
+    connection.release();
+    
+    res.status(200).json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      environment: process.env.NODE_ENV,
+      uptime: process.uptime(),
+      version: '1.0.0'
+    });
+  } catch (error) {
+    console.error('Health check failed:', error);
+    res.status(500).json({
+      status: 'unhealthy',
+      timestamp: new Date().toISOString(),
+      error: error.message
+    });
+  }
 });
 
 // Обработчик ошибок для Multer

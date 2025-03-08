@@ -6,7 +6,7 @@ const pool = mysql.createPool({
     host: process.env.DB_HOST,
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
-    database: 'root',  // Используем существующую базу root
+    database: 'helpdesk',  // Используем существующую базу
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
@@ -21,21 +21,20 @@ const testConnection = async () => {
         const connection = await pool.getConnection();
         console.log('Database connected successfully');
         
-        // Проверяем существование таблицы customers 
-        const [tables] = await connection.query(
-            'SHOW TABLES LIKE "tickets"'
-        );
-        
-        if (tables.length > 0) {
-            console.log('Table tickets exists');
+        // Check table existence with proper error handling
+        try {
+            const [tables] = await connection.query('SHOW TABLES LIKE "tickets"');
             
-            // Проверяем структуру таблицы
-            const [columns] = await connection.query(
-                'SHOW COLUMNS FROM tickets'
-            );
-            console.log('Table structure:', columns.map(col => col.Field));
-        } else {
-            console.log('Table customers does not exist');
+            if (tables.length > 0) {
+                console.log('Table tickets exists');
+                
+                const [columns] = await connection.query('SHOW COLUMNS FROM tickets');
+                console.log('Table structure:', columns.map(col => col.Field));
+            } else {
+                console.log('Table tickets does not exist');
+            }
+        } catch (err) {
+            console.error('Error checking tables:', err.message);
         }
 
         connection.release();
@@ -53,4 +52,6 @@ const testConnection = async () => {
 // Выполняем проверку подключения при запуске
 testConnection();
 
+// Экспортируем и пул, и функцию тестирования
 module.exports = pool;
+module.exports.testConnection = testConnection;
