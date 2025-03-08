@@ -23,7 +23,8 @@ const whitelist = [
   'http://localhost:3030',
   'https://biz360-sepia.vercel.app',
   'https://biz360.vercel.app',
-  'https://helpdesk-ten-omega.vercel.app'
+  'https://helpdesk-ten-omega.vercel.app',
+  'https://helpdesk-client-iota.vercel.app'
 ];
 
 const corsOptions = {
