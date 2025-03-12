@@ -22,7 +22,8 @@ const whitelist = [
   'http://localhost:3030',
   'https://helpdesk-ten-omega.vercel.app',
   'https://helpdesk-client-iota.vercel.app',
-  'https://helpdesk-admin.vercel.app'
+  'https://helpdesk-admin-three.vercel.app',
+
 ];
 
 const corsOptions = {
