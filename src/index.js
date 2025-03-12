@@ -9,7 +9,7 @@ const pool = require('./config/database');
 
 // Импорт маршрутов
 const authRoutes = require('./routes/authRoutes');
-const adminAuthRoutes = require('./routes/adminAuthRoutes'); // Новый импорт маршрутов админ-панели
+const adminAuthRoutes = require('./routes/adminAuthRoutes');
 const employeeRoutes = require('./routes/employeeRoutes');
 const companyRoutes = require('./routes/companyRoutes');
 const chatRoutes = require('./routes/chatRoutes');
@@ -27,7 +27,7 @@ const whitelist = [
   'https://biz360.vercel.app',
   'https://helpdesk-ten-omega.vercel.app',
   'https://helpdesk-client-iota.vercel.app',
-  'https://helpdesk-admin.vercel.app' // Добавим URL админ-панели
+  'https://helpdesk-admin.vercel.app'
 ];
 
 const corsOptions = {
@@ -53,9 +53,7 @@ const corsOptions = {
   ],
   exposedHeaders: ['Content-Range', 'X-Content-Range'],
   credentials: true,
-  optionsSuccessStatus:
-  
-  200,
+  optionsSuccessStatus: 200,
   maxAge: 86400
 };
 
@@ -107,8 +105,8 @@ const requestLogger = (req, res, next) => {
 app.use(requestLogger);
 
 // Подключение маршрутов
-app.use('/api/auth', authRoutes); // Обычная JWT-авторизация для клиентов
-app.use('/api/admin', adminAuthRoutes); // Новый маршрут для админ-панели
+app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminAuthRoutes);
 app.use('/api/employees', employeeRoutes);
 app.use('/api/companies', companyRoutes);
 app.use('/api/chat', chatRoutes);

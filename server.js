@@ -18,7 +18,7 @@ pool.testConnection().then(isConnected => {
     const server = http.createServer(app);
     
     // Start server on the specified port
-    server.listen(PORT, '0.0.0.0', () => {
+    server.listen(PORT, () => {
         console.log('=================================');
         console.log(`Server started on port ${PORT}`);
         console.log(`Environment: ${process.env.NODE_ENV}`);
