@@ -1,4 +1,4 @@
-// index.js
+// src/index.js
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
@@ -6,8 +6,10 @@ const fs = require('fs');
 const multer = require('multer');
 require('dotenv').config();
 const pool = require('./config/database');
+
 // Импорт маршрутов
 const authRoutes = require('./routes/authRoutes');
+const adminAuthRoutes = require('./routes/adminAuthRoutes'); // Новый импорт маршрутов админ-панели
 const employeeRoutes = require('./routes/employeeRoutes');
 const companyRoutes = require('./routes/companyRoutes');
 const chatRoutes = require('./routes/chatRoutes');
@@ -24,7 +26,8 @@ const whitelist = [
   'https://biz360-sepia.vercel.app',
   'https://biz360.vercel.app',
   'https://helpdesk-ten-omega.vercel.app',
-  'https://helpdesk-client-iota.vercel.app'
+  'https://helpdesk-client-iota.vercel.app',
+  'https://helpdesk-admin.vercel.app' // Добавим URL админ-панели
 ];
 
 const corsOptions = {
@@ -50,7 +53,9 @@ const corsOptions = {
   ],
   exposedHeaders: ['Content-Range', 'X-Content-Range'],
   credentials: true,
-  optionsSuccessStatus: 200,
+  optionsSuccessStatus:
+  
+  200,
   maxAge: 86400
 };
 
@@ -102,12 +107,13 @@ const requestLogger = (req, res, next) => {
 app.use(requestLogger);
 
 // Подключение маршрутов
-app.use('/api/auth', authRoutes);
+app.use('/api/auth', authRoutes); // Обычная JWT-авторизация для клиентов
+app.use('/api/admin', adminAuthRoutes); // Новый маршрут для админ-панели
 app.use('/api/employees', employeeRoutes);
 app.use('/api/companies', companyRoutes);
 app.use('/api/chat', chatRoutes);
-app.use('/api/tickets', ticketRoutes); // <-- Новое подключение маршрутов для тикетов
-app.use('/api/requesters', requesterRoutes); // <-- Маршруты для управления заявителями
+app.use('/api/tickets', ticketRoutes);
+app.use('/api/requesters', requesterRoutes);
 
 // Корневой endpoint
 app.get('/', (req, res) => {
@@ -127,6 +133,11 @@ app.get('/', (req, res) => {
         logout: '/api/auth/logout',
         refreshToken: '/api/auth/refresh-token'
       },
+      admin: {
+        login: '/api/admin/login',
+        users: '/api/admin/users',
+        check: '/api/admin/check'
+      },
       companies: {
         list: '/api/companies',
         checkBin: '/api/companies/check-bin/:bin',
@@ -140,13 +151,18 @@ app.get('/', (req, res) => {
         update: '/api/employees/:id',
         delete: '/api/employees/:id'
       },
+      tickets: {
+        list: '/api/tickets',
+        detail: '/api/tickets/:id',
+        create: '/api/tickets',
+        update: '/api/tickets/:id',
+        delete: '/api/tickets/:id' 
+      }
     }
   });
 });
 
 // Health Check endpoint
-// Add a more robust health check endpoint
-// Добавьте этот код в index.js, ПЕРЕД подключением всех маршрутов
 app.get('/health', async (req, res) => {
   try {
     // Попробуем выполнить простой запрос к базе данных
@@ -223,7 +239,8 @@ app.use('*', (req, res) => {
     timestamp: new Date().toISOString(),
     availableEndpoints: {
       auth: '/api/auth',
-      product: '/api/product',
+      admin: '/api/admin',
+      tickets: '/api/tickets',
       employees: '/api/employees',
       health: '/health'
     }
