@@ -27,12 +27,8 @@ const auth = async (req, res, next) => {
                     e.id as employee_id,
                     e.role as employee_role,
                     e.status as employee_status,
-                    e.company_id,
-                    c.name as company_name,
-                    c.status as company_status
                 FROM users u
                 LEFT JOIN employees e ON u.email = e.email
-                LEFT JOIN companies c ON e.company_id = c.id
                 WHERE u.id = ?
             `, [decoded.userId]);
 

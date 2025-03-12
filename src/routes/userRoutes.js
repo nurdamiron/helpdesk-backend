@@ -3,22 +3,17 @@ const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/userController');
 
-// Вход пользователя (авторизация)
+// логин
 router.post('/login', userController.login);
-
-// Получение списка пользователей
+// все пользователи
 router.get('/', userController.getUsers);
-
-// Создание нового пользователя
+// создать
 router.post('/', userController.createUser);
-
-// Получение данных конкретного пользователя
+// один пользователь
 router.get('/:id', userController.getUserById);
-
-// Обновление данных пользователя
+// обновить
 router.put('/:id', userController.updateUser);
-
-// Удаление пользователя
+// удалить
 router.delete('/:id', userController.deleteUser);
 
 module.exports = router;

@@ -10,7 +10,9 @@ const pool = require('./config/database');
 // Импорт маршрутов
 const ticketRoutes = require('./routes/ticketRoutes');
 const userRoutes = require('./routes/userRoutes');
-
+const adminAuthRoutes = require('./routes/adminAuthRoutes');
+const chatRoutes = require('./routes/chatRoutes');
+const requesterRoutes = require('./routes/requesterRoutes');
 const app = express();
 
 // Конфигурация CORS
@@ -33,13 +35,7 @@ const corsOptions = {
     }
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: [
-    'Content-Type',
-    'Authorization',
-    'Accept',
-    'Origin',
-    'X-Requested-With'
-  ],
+  allowedHeaders: '*',
   credentials: true,
   optionsSuccessStatus: 200,
   maxAge: 86400
@@ -94,7 +90,9 @@ app.use(requestLogger);
 // Подключение маршрутов
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/users', userRoutes);
-
+app.use('/api/admin', adminAuthRoutes);
+app.use('/api/chat', chatRoutes);
+app.use('/api/requesters', requesterRoutes);
 // Корневой endpoint с информацией об API
 app.get('/', (req, res) => {
   res.json({
