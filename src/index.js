@@ -91,9 +91,10 @@ app.use(requestLogger);
 // Подключение маршрутов
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/users', userRoutes);
-app.use('/api/admin', authRoutes);
+app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/requesters', requesterRoutes);
+
 // Корневой endpoint с информацией об API
 app.get('/', (req, res) => {
   res.json({
@@ -102,6 +103,12 @@ app.get('/', (req, res) => {
     environment: process.env.NODE_ENV,
     timestamp: new Date().toISOString(),
     endpoints: {
+      auth: {
+        login: '/api/auth/login',
+        register: '/api/auth/register',
+        me: '/api/auth/me',
+        users: '/api/auth/users'
+      },
       tickets: {
         list: '/api/tickets',
         details: '/api/tickets/:id',
@@ -112,7 +119,6 @@ app.get('/', (req, res) => {
         addAttachment: '/api/tickets/:id/attachments'
       },
       users: {
-        login: '/api/users/login',
         list: '/api/users',
         details: '/api/users/:id',
         create: '/api/users',
@@ -199,6 +205,7 @@ app.use('*', (req, res) => {
     path: req.originalUrl,
     timestamp: new Date().toISOString(),
     availableEndpoints: {
+      auth: '/api/auth',
       users: '/api/users',
       tickets: '/api/tickets',
       health: '/health'
