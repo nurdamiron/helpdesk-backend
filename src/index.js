@@ -10,7 +10,7 @@ const pool = require('./config/database');
 // Импорт маршрутов
 const ticketRoutes = require('./routes/ticketRoutes');
 const userRoutes = require('./routes/userRoutes');
-const adminAuthRoutes = require('./routes/adminAuthRoutes');
+const authRoutes = require('./routes/authRoutes');
 const chatRoutes = require('./routes/chatRoutes');
 const requesterRoutes = require('./routes/requesterRoutes');
 const app = express();
@@ -19,11 +19,11 @@ const app = express();
 const whitelist = [
   'http://localhost:5000',
   'http://localhost:3000',
+  'http://localhost:3001',
   'http://localhost:3030',
   'https://helpdesk-ten-omega.vercel.app',
   'https://helpdesk-client-iota.vercel.app',
-  'https://helpdesk-admin-three.vercel.app',
-
+  'https://helpdesk-admin-three.vercel.app'
 ];
 
 const corsOptions = {
@@ -91,7 +91,7 @@ app.use(requestLogger);
 // Подключение маршрутов
 app.use('/api/tickets', ticketRoutes);
 app.use('/api/users', userRoutes);
-app.use('/api/admin', adminAuthRoutes);
+app.use('/api/admin', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/requesters', requesterRoutes);
 // Корневой endpoint с информацией об API
