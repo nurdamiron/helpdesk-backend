@@ -2,8 +2,10 @@
 const express = require('express');
 const router = express.Router();
 const ticketController = require('../controllers/ticketController');
+const messageController = require('../controllers/messageController');
 const multer = require('multer');
 const path = require('path');
+const auth = require('../middleware/auth');
 
 // Настройка для загрузки файлов
 const storage = multer.diskStorage({
@@ -41,13 +43,29 @@ const upload = multer({
   limits: { fileSize: 10*1024*1024 } // 10MB
 });
 
-// Роуты
+// Для упрощения разработки можно временно отключить проверку авторизации
+const devAuth = (req, res, next) => {
+  // В реальном проекте используйте auth middleware
+  // В режиме разработки можем имитировать пользователя
+  req.user = {
+    id: 1,
+    email: 'dev@example.com',
+    role: 'staff'
+  };
+  next();
+};
+
+// Маршруты для работы с заявками
 router.post('/', ticketController.createTicket);
 router.get('/', ticketController.getTickets);
 router.get('/:id', ticketController.getTicketById);
 router.put('/:id', ticketController.updateTicket);
 router.delete('/:id', ticketController.deleteTicket);
-router.post('/:id/messages', ticketController.addMessage);
-router.post('/:id/attachments', upload.single('file'), ticketController.uploadAttachment);
+
+// Добавляем маршруты для работы с сообщениями заявок
+router.get('/:ticketId/messages', messageController.getTicketMessages);
+router.post('/:ticketId/messages', devAuth, messageController.addMessage);
+router.put('/:ticketId/messages/read', devAuth, messageController.markMessagesAsRead);
+router.post('/:ticketId/attachments', devAuth, upload.single('file'), messageController.uploadAttachment);
 
 module.exports = router;

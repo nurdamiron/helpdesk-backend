@@ -12,6 +12,7 @@ const ticketRoutes = require('./routes/ticketRoutes');
 const userRoutes = require('./routes/userRoutes');
 const authRoutes = require('./routes/authRoutes');
 const chatRoutes = require('./routes/chatRoutes');
+const messageRoutes = require('./routes/messageRoutes');
 const requesterRoutes = require('./routes/requesterRoutes');
 const app = express();
 
@@ -93,6 +94,7 @@ app.use('/api/tickets', ticketRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
+app.use('/api/messages', messageRoutes);
 app.use('/api/requesters', requesterRoutes);
 
 // Корневой endpoint с информацией об API

@@ -17,9 +17,12 @@ exports.getTicketMessages = async (req, res) => {
   try {
     const { ticketId } = req.params;
     
+    console.log(`Запрос на получение сообщений для заявки #${ticketId}`);
+    
     // Проверяем существование заявки
     const [tickets] = await pool.query('SELECT * FROM tickets WHERE id = ?', [ticketId]);
     if (tickets.length === 0) {
+      console.log(`Заявка #${ticketId} не найдена`);
       return res.status(404).json({ 
         status: 'error', 
         error: 'Заявка не найдена' 
@@ -47,11 +50,15 @@ exports.getTicketMessages = async (req, res) => {
       ORDER BY tm.created_at ASC
     `, [ticketId]);
     
+    console.log(`Найдено ${messages.length} сообщений для заявки #${ticketId}`);
+    
     // Получаем вложения для сообщений
     const [attachments] = await pool.query(`
       SELECT * FROM ticket_attachments 
       WHERE ticket_id = ? AND message_id IS NOT NULL
     `, [ticketId]);
+    
+    console.log(`Найдено ${attachments.length} вложений для заявки #${ticketId}`);
     
     // Добавляем вложения к сообщениям
     const messagesWithAttachments = messages.map(message => {
@@ -89,20 +96,36 @@ exports.getTicketMessages = async (req, res) => {
 exports.addMessage = async (req, res) => {
   try {
     const { ticketId } = req.params;
-    const { body, attachments = [], notify_email = false } = req.body;
+    let { body, attachments = [], notify_email = false } = req.body;
     
-    // Определяем отправителя (предполагаем, что это сотрудник)
-    const sender_type = 'staff';
-    const sender_id = req.user?.id || null;
+    console.log(`Запрос на добавление сообщения к заявке #${ticketId}:`, {
+      body: body ? (body.length > 100 ? body.substring(0, 100) + '...' : body) : null,
+      attachments,
+      notify_email
+    });
     
-    if (!body) {
+    // Нормализуем body
+    if (body === undefined || body === null) {
+      body = '';
+    }
+    
+    // Определяем отправителя (staff - сотрудник, requester - клиент)
+    // По умолчанию считаем, что это сотрудник
+    const sender_type = req.user?.role === 'client' ? 'requester' : 'staff';
+    const sender_id = req.user?.id || 1; // Используем ID из req.user или 1 по умолчанию
+    
+    console.log(`Отправитель: тип=${sender_type}, id=${sender_id}`);
+    
+    // Проверяем, есть ли хоть что-то в сообщении (текст или вложения)
+    if (!body.trim() && (!attachments || attachments.length === 0)) {
+      console.log(`Ошибка: пустое сообщение без вложений`);
       return res.status(400).json({ 
         status: 'error', 
-        error: 'Текст сообщения не может быть пустым' 
+        error: 'Сообщение должно содержать текст или вложения' 
       });
     }
     
-    // Проверяем существование заявки
+    // Проверяем существование заявки и получаем данные о клиенте
     const [tickets] = await pool.query(`
       SELECT t.*, r.email as requester_email, r.full_name as requester_name
       FROM tickets t
@@ -111,6 +134,7 @@ exports.addMessage = async (req, res) => {
     `, [ticketId]);
     
     if (tickets.length === 0) {
+      console.log(`Заявка #${ticketId} не найдена`);
       return res.status(404).json({ 
         status: 'error', 
         error: 'Заявка не найдена' 
@@ -118,8 +142,9 @@ exports.addMessage = async (req, res) => {
     }
     
     const ticket = tickets[0];
+    console.log(`Заявка #${ticketId} найдена, клиент: ${ticket.requester_email || 'email не указан'}`);
     
-    // Добавляем сообщение
+    // Создаем сообщение
     const [result] = await pool.query(`
       INSERT INTO ticket_messages (
         ticket_id, 
@@ -131,9 +156,12 @@ exports.addMessage = async (req, res) => {
     `, [ticketId, sender_type, sender_id, body, 'text']);
     
     const messageId = result.insertId;
+    console.log(`Создано сообщение с ID ${messageId}`);
     
-    // Связываем вложения с сообщением, если они есть
-    if (attachments.length > 0) {
+    // Если есть вложения, связываем их с сообщением
+    if (attachments && attachments.length > 0) {
+      console.log(`Связываем ${attachments.length} вложений с сообщением ${messageId}`);
+      
       for (const attachmentId of attachments) {
         await pool.query(`
           UPDATE ticket_attachments 
@@ -143,14 +171,23 @@ exports.addMessage = async (req, res) => {
       }
     }
     
-    // Обновляем дату изменения заявки
+    // Обновляем статус заявки и дату обновления
+    // Если заявка была решена или закрыта, переводим ее в статус "в работе"
     await pool.query(`
       UPDATE tickets 
-      SET updated_at = CURRENT_TIMESTAMP 
+      SET 
+        updated_at = CURRENT_TIMESTAMP,
+        status = CASE 
+                  WHEN status = 'resolved' THEN 'in_progress'
+                  WHEN status = 'closed' THEN 'in_progress'
+                  ELSE status 
+                END
       WHERE id = ?
     `, [ticketId]);
     
-    // Получаем данные о добавленном сообщении
+    console.log(`Обновлен статус заявки #${ticketId}`);
+    
+    // Получаем информацию о созданном сообщении
     const [newMessage] = await pool.query(`
       SELECT 
         m.*,
@@ -176,6 +213,8 @@ exports.addMessage = async (req, res) => {
       WHERE message_id = ?
     `, [messageId]);
     
+    console.log(`Получены ${messageAttachments.length} вложений для сообщения ${messageId}`);
+    
     const message = {
       ...newMessage[0],
       sender: {
@@ -187,20 +226,26 @@ exports.addMessage = async (req, res) => {
       attachments: messageAttachments
     };
     
-    // Отправляем уведомление на email заявителя, если нужно
+    // Отправляем уведомление на email клиента, если это требуется
+    // и если у клиента указан email
     if (notify_email && ticket.requester_email) {
+      console.log(`Отправка email-уведомления на адрес ${ticket.requester_email}`);
       try {
         await sendMessageNotification(
           ticket, 
           message, 
           messageAttachments
         );
+        console.log(`Email успешно отправлен на ${ticket.requester_email}`);
       } catch (emailError) {
-        console.error('Error sending email notification:', emailError);
+        console.error('Ошибка отправки email-уведомления:', emailError);
         // Не возвращаем ошибку, чтобы не блокировать добавление сообщения
       }
+    } else if (notify_email) {
+      console.log(`Email не отправлен: email клиента не указан`);
     }
     
+    // Возвращаем созданное сообщение в ответе
     return res.status(201).json({
       status: 'success',
       message
@@ -217,8 +262,13 @@ exports.addMessage = async (req, res) => {
 
 // Функция отправки уведомления на email
 async function sendMessageNotification(ticket, message, attachments = []) {
+  // Проверка наличия email
+  if (!ticket.requester_email) {
+    throw new Error('Email recipient not specified');
+  }
+
   // Формируем URL для перехода к заявке
-  const ticketUrl = `${process.env.FRONTEND_URL || 'https://helpdesk.example.com'}/tickets/${ticket.id}`;
+  const ticketUrl = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/tickets/${ticket.id}`;
   
   // Формируем HTML письма
   const html = `
@@ -297,7 +347,7 @@ async function sendMessageNotification(ticket, message, attachments = []) {
           
           <div class="message">
             <p><strong>Сообщение от ${message.sender.name || 'сотрудника службы поддержки'}:</strong></p>
-            <p>${message.content}</p>
+            <p>${message.content || 'Прикреплены файлы. Смотрите раздел вложений.'}</p>
             
             ${attachments.length > 0 ? 
               `<p><strong>Вложения:</strong></p>
@@ -339,7 +389,7 @@ async function sendMessageNotification(ticket, message, attachments = []) {
   };
   
   // Отправляем письмо
-  await transporter.sendMail(mailOptions);
+  return await transporter.sendMail(mailOptions);
 }
 
 // Отметить сообщения как прочитанные
@@ -348,14 +398,9 @@ exports.markMessagesAsRead = async (req, res) => {
     const { ticketId } = req.params;
     const userId = req.user?.id;
     
-    if (!userId) {
-      return res.status(400).json({
-        status: 'error',
-        error: 'Пользователь не идентифицирован'
-      });
-    }
+    console.log(`Запрос на отметку сообщений как прочитанные для заявки #${ticketId}`);
     
-    // Обновляем время прочтения для всех сообщений, которые не были прочитаны
+    // Обновляем время прочтения для всех сообщений от клиентов в этой заявке
     await pool.query(`
       UPDATE ticket_messages
       SET read_at = CURRENT_TIMESTAMP
@@ -363,6 +408,8 @@ exports.markMessagesAsRead = async (req, res) => {
       AND sender_type = 'requester'
       AND read_at IS NULL
     `, [ticketId]);
+    
+    console.log(`Сообщения заявки #${ticketId} отмечены как прочитанные`);
     
     return res.json({
       status: 'success',
@@ -383,7 +430,10 @@ exports.uploadAttachment = async (req, res) => {
   try {
     const { ticketId } = req.params;
     
+    console.log(`Запрос на загрузку вложения для заявки #${ticketId}`);
+    
     if (!req.file) {
+      console.log('Ошибка: файл не загружен');
       return res.status(400).json({
         status: 'error',
         error: 'Файл не загружен'
@@ -393,6 +443,7 @@ exports.uploadAttachment = async (req, res) => {
     // Проверяем существование заявки
     const [tickets] = await pool.query('SELECT * FROM tickets WHERE id = ?', [ticketId]);
     if (tickets.length === 0) {
+      console.log(`Заявка #${ticketId} не найдена`);
       return res.status(404).json({
         status: 'error',
         error: 'Заявка не найдена'
@@ -402,7 +453,9 @@ exports.uploadAttachment = async (req, res) => {
     const { filename, path, mimetype, size } = req.file;
     const userId = req.user?.id;
     
-    // Сохраняем вложение
+    console.log(`Загрузка файла: ${filename}, размер: ${size}, MIME: ${mimetype}`);
+    
+    // Сохраняем вложение в БД
     const [result] = await pool.query(`
       INSERT INTO ticket_attachments (
         ticket_id,
@@ -414,15 +467,21 @@ exports.uploadAttachment = async (req, res) => {
       ) VALUES (?, ?, ?, ?, ?, ?)
     `, [ticketId, filename, path, mimetype, size, userId]);
     
+    const attachmentId = result.insertId;
+    console.log(`Создано вложение с ID ${attachmentId}`);
+    
     // Получаем данные созданного вложения
-    const [attachment] = await pool.query('SELECT * FROM ticket_attachments WHERE id = ?', [result.insertId]);
+    const [attachment] = await pool.query('SELECT * FROM ticket_attachments WHERE id = ?', [attachmentId]);
     
     if (attachment.length === 0) {
+      console.log(`Ошибка: не удалось найти созданное вложение ${attachmentId}`);
       return res.status(500).json({
         status: 'error',
         error: 'Ошибка при сохранении вложения'
       });
     }
+    
+    console.log(`Вложение успешно создано: ${attachment[0].file_name}`);
     
     return res.status(201).json({
       status: 'success',
