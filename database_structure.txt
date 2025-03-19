@@ -1,0 +1,284 @@
+СТРУКТУРА БАЗЫ ДАННЫХ
+==================================================
+
+ТАБЛИЦА: requesters
+--------------------------------------------------
+
+Колонки:
+  id int NOT NULL PRI  auto_increment
+  email varchar(255) NOT NULL UNI  
+  full_name varchar(255) NULL   
+  phone varchar(20) NULL   
+  preferred_contact enum('email','phone','whatsapp') NULL  DEFAULT email 
+  created_at timestamp NULL  DEFAULT CURRENT_TIMESTAMP DEFAULT_GENERATED
+  updated_at timestamp NULL  DEFAULT CURRENT_TIMESTAMP DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+Индексы:
+  PRIMARY UNIQUE: (id)
+  email UNIQUE: (email)
+
+SQL создания таблицы:
+CREATE TABLE `requesters` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `email` varchar(255) NOT NULL,
+  `full_name` varchar(255) DEFAULT NULL,
+  `phone` varchar(20) DEFAULT NULL,
+  `preferred_contact` enum('email','phone','whatsapp') DEFAULT 'email',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `email` (`email`)
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+==================================================
+
+ТАБЛИЦА: ticket_attachments
+--------------------------------------------------
+
+Колонки:
+  id int NOT NULL PRI  auto_increment
+  ticket_id int NOT NULL MUL  
+  message_id int NULL MUL  
+  file_name varchar(255) NOT NULL   
+  file_path varchar(255) NOT NULL   
+  file_type varchar(100) NULL   
+  file_size int NULL   
+  uploaded_by int NULL MUL  
+  created_at timestamp NULL  DEFAULT CURRENT_TIMESTAMP DEFAULT_GENERATED
+
+Внешние ключи:
+  ticket_attachments_ibfk_1: ticket_attachments.ticket_id -> tickets.id
+  ticket_attachments_ibfk_2: ticket_attachments.message_id -> ticket_messages.id
+  ticket_attachments_ibfk_3: ticket_attachments.uploaded_by -> users.id
+
+Индексы:
+  PRIMARY UNIQUE: (id)
+  ticket_id : (ticket_id)
+  message_id : (message_id)
+  uploaded_by : (uploaded_by)
+
+SQL создания таблицы:
+CREATE TABLE `ticket_attachments` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `ticket_id` int NOT NULL,
+  `message_id` int DEFAULT NULL,
+  `file_name` varchar(255) NOT NULL,
+  `file_path` varchar(255) NOT NULL,
+  `file_type` varchar(100) DEFAULT NULL,
+  `file_size` int DEFAULT NULL,
+  `uploaded_by` int DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `ticket_id` (`ticket_id`),
+  KEY `message_id` (`message_id`),
+  KEY `uploaded_by` (`uploaded_by`),
+  CONSTRAINT `ticket_attachments_ibfk_1` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `ticket_attachments_ibfk_2` FOREIGN KEY (`message_id`) REFERENCES `ticket_messages` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `ticket_attachments_ibfk_3` FOREIGN KEY (`uploaded_by`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+==================================================
+
+ТАБЛИЦА: ticket_history
+--------------------------------------------------
+
+Колонки:
+  id int NOT NULL PRI  auto_increment
+  ticket_id int NOT NULL MUL  
+  user_id int NULL MUL  
+  action varchar(50) NOT NULL   
+  details json NULL   
+  created_at timestamp NULL  DEFAULT CURRENT_TIMESTAMP DEFAULT_GENERATED
+
+Внешние ключи:
+  ticket_history_ibfk_1: ticket_history.ticket_id -> tickets.id
+  ticket_history_ibfk_2: ticket_history.user_id -> users.id
+
+Индексы:
+  PRIMARY UNIQUE: (id)
+  ticket_id : (ticket_id)
+  user_id : (user_id)
+
+SQL создания таблицы:
+CREATE TABLE `ticket_history` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `ticket_id` int NOT NULL,
+  `user_id` int DEFAULT NULL,
+  `action` varchar(50) NOT NULL,
+  `details` json DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `ticket_id` (`ticket_id`),
+  KEY `user_id` (`user_id`),
+  CONSTRAINT `ticket_history_ibfk_1` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `ticket_history_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+==================================================
+
+ТАБЛИЦА: ticket_messages
+--------------------------------------------------
+
+Колонки:
+  id int NOT NULL PRI  auto_increment
+  ticket_id int NOT NULL MUL  
+  sender_type enum('requester','staff','system') NOT NULL   
+  sender_id int NULL   
+  content text NOT NULL   
+  content_type enum('text','html') NULL  DEFAULT text 
+  is_internal tinyint(1) NULL  DEFAULT 0 
+  read_at timestamp NULL   
+  created_at timestamp NULL  DEFAULT CURRENT_TIMESTAMP DEFAULT_GENERATED
+
+Внешние ключи:
+  ticket_messages_ibfk_1: ticket_messages.ticket_id -> tickets.id
+
+Индексы:
+  PRIMARY UNIQUE: (id)
+  ticket_id : (ticket_id)
+
+SQL создания таблицы:
+CREATE TABLE `ticket_messages` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `ticket_id` int NOT NULL,
+  `sender_type` enum('requester','staff','system') NOT NULL,
+  `sender_id` int DEFAULT NULL,
+  `content` text NOT NULL,
+  `content_type` enum('text','html') DEFAULT 'text',
+  `is_internal` tinyint(1) DEFAULT '0',
+  `read_at` timestamp NULL DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `ticket_id` (`ticket_id`),
+  CONSTRAINT `ticket_messages_ibfk_1` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+==================================================
+
+ТАБЛИЦА: ticket_notes
+--------------------------------------------------
+
+Колонки:
+  id int NOT NULL PRI  auto_increment
+  ticket_id int NOT NULL MUL  
+  user_id int NOT NULL MUL  
+  content text NOT NULL   
+  created_at timestamp NULL  DEFAULT CURRENT_TIMESTAMP DEFAULT_GENERATED
+  updated_at timestamp NULL  DEFAULT CURRENT_TIMESTAMP DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+Внешние ключи:
+  ticket_notes_ibfk_1: ticket_notes.ticket_id -> tickets.id
+  ticket_notes_ibfk_2: ticket_notes.user_id -> users.id
+
+Индексы:
+  PRIMARY UNIQUE: (id)
+  ticket_id : (ticket_id)
+  user_id : (user_id)
+
+SQL создания таблицы:
+CREATE TABLE `ticket_notes` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `ticket_id` int NOT NULL,
+  `user_id` int NOT NULL,
+  `content` text NOT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `ticket_id` (`ticket_id`),
+  KEY `user_id` (`user_id`),
+  CONSTRAINT `ticket_notes_ibfk_1` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE,
+  CONSTRAINT `ticket_notes_ibfk_2` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+==================================================
+
+ТАБЛИЦА: tickets
+--------------------------------------------------
+
+Колонки:
+  id int NOT NULL PRI  auto_increment
+  subject varchar(255) NOT NULL   
+  description text NULL   
+  status enum('new','open','in_progress','pending','resolved','closed') NULL  DEFAULT new 
+  priority enum('low','medium','high','urgent') NULL  DEFAULT medium 
+  category varchar(50) NULL  DEFAULT other 
+  requester_id int NULL MUL  
+  assigned_to int NULL MUL  
+  property_type varchar(50) NULL   
+  property_address text NULL   
+  property_area decimal(10,2) NULL   
+  deadline datetime NULL   
+  created_at timestamp NULL  DEFAULT CURRENT_TIMESTAMP DEFAULT_GENERATED
+  updated_at timestamp NULL  DEFAULT CURRENT_TIMESTAMP DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+Внешние ключи:
+  tickets_ibfk_1: tickets.requester_id -> requesters.id
+  tickets_ibfk_2: tickets.assigned_to -> users.id
+
+Индексы:
+  PRIMARY UNIQUE: (id)
+  requester_id : (requester_id)
+  assigned_to : (assigned_to)
+
+SQL создания таблицы:
+CREATE TABLE `tickets` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `subject` varchar(255) NOT NULL,
+  `description` text,
+  `status` enum('new','open','in_progress','pending','resolved','closed') DEFAULT 'new',
+  `priority` enum('low','medium','high','urgent') DEFAULT 'medium',
+  `category` varchar(50) DEFAULT 'other',
+  `requester_id` int DEFAULT NULL,
+  `assigned_to` int DEFAULT NULL,
+  `property_type` varchar(50) DEFAULT NULL,
+  `property_address` text,
+  `property_area` decimal(10,2) DEFAULT NULL,
+  `deadline` datetime DEFAULT NULL,
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `requester_id` (`requester_id`),
+  KEY `assigned_to` (`assigned_to`),
+  CONSTRAINT `tickets_ibfk_1` FOREIGN KEY (`requester_id`) REFERENCES `requesters` (`id`) ON DELETE SET NULL,
+  CONSTRAINT `tickets_ibfk_2` FOREIGN KEY (`assigned_to`) REFERENCES `users` (`id`) ON DELETE SET NULL
+) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+==================================================
+
+ТАБЛИЦА: users
+--------------------------------------------------
+
+Колонки:
+  id int NOT NULL PRI  auto_increment
+  email varchar(255) NOT NULL UNI  
+  password varchar(255) NOT NULL   
+  first_name varchar(100) NULL   
+  last_name varchar(100) NULL   
+  role enum('user','support','manager','admin') NULL  DEFAULT user 
+  active tinyint(1) NULL  DEFAULT 1 
+  created_at timestamp NULL  DEFAULT CURRENT_TIMESTAMP DEFAULT_GENERATED
+  updated_at timestamp NULL  DEFAULT CURRENT_TIMESTAMP DEFAULT_GENERATED on update CURRENT_TIMESTAMP
+
+Индексы:
+  PRIMARY UNIQUE: (id)
+  email UNIQUE: (email)
+  email_2 UNIQUE: (email)
+
+SQL создания таблицы:
+CREATE TABLE `users` (
+  `id` int NOT NULL AUTO_INCREMENT,
+  `email` varchar(255) NOT NULL,
+  `password` varchar(255) NOT NULL,
+  `first_name` varchar(100) DEFAULT NULL,
+  `last_name` varchar(100) DEFAULT NULL,
+  `role` enum('user','support','manager','admin') DEFAULT 'user',
+  `active` tinyint(1) DEFAULT '1',
+  `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `email` (`email`),
+  UNIQUE KEY `email_2` (`email`)
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+
+==================================================
+
