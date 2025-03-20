@@ -100,44 +100,46 @@ exports.getTicketMessages = async (req, res) => {
 exports.addMessage = async (req, res) => {
   try {
     const { ticketId } = req.params;
-    let { content, attachments = [], notify_email = false } = req.body;
+    let { content, sender_type, sender_id, attachments = [], notify_email = false } = req.body;
     
-    // В зависимости от входящего API, параметр может быть content или body
-    // API кірісіне байланысты параметр content немесе body болуы мүмкін
+    // In case the API is being called with different parameter names
     if (!content && req.body.body) {
       content = req.body.body;
     }
     
-    console.log(`Запрос на добавление сообщения к заявке #${ticketId}`);
-    console.log(`#${ticketId} өтініміне хабарлама қосу сұрауы`);
+    console.log(`Request to add message to ticket #${ticketId}`, {
+      sender_type, 
+      sender_id, 
+      content_length: content?.length || 0,
+      attachments_count: attachments?.length || 0
+    });
     
-    // Нормализуем content
-    // Content параметрін қалыпқа келтіреміз
+    // Normalize content
     if (content === undefined || content === null) {
       content = '';
     }
     
-    // Определяем отправителя (staff - сотрудник, requester - клиент)
-    // Жіберушіні анықтаймыз (staff - қызметкер, requester - клиент)
-    const sender_type = req.user?.role === 'client' ? 'requester' : 'staff';
-    const sender_id = req.user?.id || 1; // Используем ID из req.user или 1 по умолчанию
+    // Determine sender type (staff or requester)
+    // If not explicitly provided, use information from the authentication
+    if (!sender_type) {
+      sender_type = req.user?.role === 'client' ? 'requester' : 'staff';
+    }
     
-    console.log(`Отправитель: тип=${sender_type}, id=${sender_id}`);
-    console.log(`Жіберуші: түрі=${sender_type}, id=${sender_id}`);
+    // Use auth user ID or default if not available
+    const user_id = req.user?.id || sender_id || 1;
     
-    // Проверяем, есть ли хоть что-то в сообщении (текст или вложения)
-    // Хабарламада бірдеңе бар-жоғын тексереміз (мәтін немесе тіркемелер)
+    console.log(`Sender determined as: type=${sender_type}, id=${user_id}`);
+    
+    // Check for minimum content (text or attachments)
     if (!content.trim() && (!attachments || attachments.length === 0)) {
-      console.log(`Ошибка: пустое сообщение без вложений`);
-      console.log(`Қате: мәтінсіз және тіркемесіз бос хабарлама`);
+      console.log(`Error: empty message without attachments`);
       return res.status(400).json({ 
         status: 'error', 
         error: 'Сообщение должно содержать текст или вложения' 
       });
     }
     
-    // Проверяем существование заявки и получаем данные о клиенте
-    // Өтінімнің бар-жоғын тексеріп, клиент туралы мәліметтерді аламыз
+    // Verify ticket exists and get requester info
     const [tickets] = await pool.query(`
       SELECT t.*, r.email as requester_email, r.full_name as requester_name
       FROM tickets t
@@ -146,8 +148,7 @@ exports.addMessage = async (req, res) => {
     `, [ticketId]);
     
     if (tickets.length === 0) {
-      console.log(`Заявка #${ticketId} не найдена`);
-      console.log(`#${ticketId} өтінімі табылмады`);
+      console.log(`Ticket #${ticketId} not found`);
       return res.status(404).json({ 
         status: 'error', 
         error: 'Заявка не найдена' 
@@ -155,59 +156,129 @@ exports.addMessage = async (req, res) => {
     }
     
     const ticket = tickets[0];
-    console.log(`Заявка #${ticketId} найдена, клиент: ${ticket.requester_email || 'email не указан'}`);
-    console.log(`#${ticketId} өтінімі табылды, клиент: ${ticket.requester_email || 'email көрсетілмеген'}`);
+    console.log(`Ticket #${ticketId} found, requester: ${ticket.requester_email || 'email not set'}`);
     
-    // Создаем сообщение с вложениями
-    const message = await createMessageWithAttachments(
-      ticketId, 
-      sender_type, 
-      sender_id, 
-      content, 
-      attachments
+    // Create message with proper sender identification
+    const [result] = await pool.query(
+      `INSERT INTO ticket_messages
+       (ticket_id, sender_type, sender_id, content, content_type)
+       VALUES (?, ?, ?, ?, 'text')`,
+      [ticketId, sender_type, user_id, content]
     );
     
-    // Обновляем статус заявки
-    await updateTicketStatus(ticketId);
+    const messageId = result.insertId;
+    console.log(`Message created with ID ${messageId}`);
     
-    // Отправляем уведомление через WebSocket
-    await handleWebSocketNotification(message, ticket, sender_type, sender_id);
-    
-    // Отправляем уведомление на email клиента, если это требуется
-    // и если у клиента указан email
-    // Клиентке email-хабарландыру жіберу, егер бұл қажет болса 
-    // және клиенттің email-і көрсетілген болса
-    if (notify_email && ticket.requester_email) {
-      console.log(`Отправка email-уведомления на адрес ${ticket.requester_email}`);
-      console.log(`${ticket.requester_email} адресіне email-хабарландыру жіберу`);
-      try {
-        await sendMessageNotification(
-          ticket, 
-          message, 
-          message.attachments
-        );
-        console.log(`Email успешно отправлен на ${ticket.requester_email}`);
-        console.log(`Email ${ticket.requester_email} адресіне сәтті жіберілді`);
-      } catch (emailError) {
-        console.error('Ошибка отправки email-уведомления:', emailError);
-        console.error('Email-хабарландыруын жіберу қатесі:', emailError);
-        // Не возвращаем ошибку, чтобы не блокировать добавление сообщения
+    // Link attachments if provided
+    if (attachments && attachments.length > 0) {
+      for (const attachmentId of attachments) {
+        try {
+          await pool.query(
+            'UPDATE ticket_attachments SET message_id = ? WHERE id = ? AND ticket_id = ?',
+            [messageId, attachmentId, ticketId]
+          );
+        } catch (attachErr) {
+          console.error(`Error linking attachment ${attachmentId}:`, attachErr);
+        }
       }
-    } else if (notify_email) {
-      console.log(`Email не отправлен: email клиента не указан`);
-      console.log(`Email жіберілмеді: клиенттің email-і көрсетілмеген`);
     }
     
-    // Возвращаем созданное сообщение в ответе
-    // Жауапта жасалған хабарламаны қайтарамыз
+    // Update ticket status if needed (reopen closed tickets, etc.)
+    await updateTicketStatus(ticketId);
+    
+    // Get created message with sender info
+    const [messages] = await pool.query(`
+      SELECT 
+        m.*,
+        CASE 
+          WHEN m.sender_type='requester' THEN r.full_name
+          WHEN m.sender_type='staff' THEN u.first_name
+          ELSE 'Unknown'
+        END as sender_name,
+        CASE
+          WHEN m.sender_type='requester' THEN r.email
+          WHEN m.sender_type='staff' THEN u.email
+          ELSE NULL
+        END as sender_email
+      FROM ticket_messages m
+      LEFT JOIN requesters r ON (m.sender_type='requester' AND m.sender_id = r.id)
+      LEFT JOIN users u ON (m.sender_type='staff' AND m.sender_id = u.id)
+      WHERE m.id = ?
+    `, [messageId]);
+    
+    if (messages.length === 0) {
+      return res.status(500).json({
+        status: 'error',
+        error: 'Failed to retrieve created message'
+      });
+    }
+    
+    const message = messages[0];
+    
+    // Format the response message with proper structure
+    const responseMessage = {
+      id: message.id,
+      ticket_id: parseInt(ticketId),
+      content: message.content,
+      created_at: message.created_at,
+      sender: {
+        id: message.sender_id,
+        type: message.sender_type,
+        name: message.sender_name || (message.sender_type === 'requester' ? 'Клиент' : 'Администратор'),
+        email: message.sender_email
+      },
+      status: 'sent'
+    };
+    
+    // Send WebSocket notification if available
+    if (global.wsServer) {
+      try {
+        // Notify the appropriate recipient
+        if (sender_type === 'requester') {
+          // If message is from requester, notify staff
+          global.wsServer.broadcastToType('staff', {
+            type: 'new_message',
+            message: responseMessage
+          });
+        } else if (ticket.requester_id) {
+          // If message is from staff, notify requester
+          global.wsServer.sendToSpecificClient('requester', ticket.requester_id, {
+            type: 'new_message',
+            message: responseMessage
+          });
+        }
+        
+        console.log('WebSocket notification sent');
+      } catch (wsError) {
+        console.error('Error sending WebSocket notification:', wsError);
+      }
+    }
+    
+    // Send email notification if requested and recipient available
+    if (notify_email && ((sender_type === 'staff' && ticket.requester_email) || 
+                         (sender_type === 'requester' && ticket.assigned_to_email))) {
+      const recipientEmail = sender_type === 'staff' ? ticket.requester_email : ticket.assigned_to_email;
+      const recipientName = sender_type === 'staff' ? ticket.requester_name : ticket.assigned_to_name;
+      
+      try {
+        await sendMessagelNotification(ticket, responseMessage, {
+          email: recipientEmail,
+          name: recipientName
+        });
+        console.log(`Email notification sent to ${recipientEmail}`);
+      } catch (emailError) {
+        console.error('Error sending email notification:', emailError);
+      }
+    }
+    
+    // Return success response with message data
     return res.status(201).json({
       status: 'success',
-      message
+      message: responseMessage
     });
     
   } catch (error) {
-    console.error('Ошибка добавления сообщения:', error);
-    console.error('Хабарлама қосу қатесі:', error);
+    console.error('Error adding message:', error);
     return res.status(500).json({
       status: 'error',
       error: 'Внутренняя ошибка сервера'

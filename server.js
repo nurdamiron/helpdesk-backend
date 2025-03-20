@@ -88,9 +88,18 @@ async function startServer() {
     
     // Инициализируем WebSocket Manager
     // WebSocket Manager инициализациялау
-    webSocketManager.init(server, finalPort);
+    try {
+      webSocketManager.init(server, finalPort);
+      // Store WebSocket server reference globally for controller access
+      global.wsServer = webSocketManager;
+      console.log('WebSocket server initialized successfully');
+    } catch (wsError) {
+      console.error('Error initializing WebSocket server:', wsError);
+      console.log('Application will continue without WebSocket support');
+    }
     
     // Запускаем сервер на выбранном порту
+    // ВАЖНО: используем server.listen вместо app.listen
     // Серверді таңдалған портта іске қосамыз
     server.listen(finalPort, '0.0.0.0', () => {
       console.log('=================================');
@@ -98,6 +107,11 @@ async function startServer() {
       console.log(`Environment: ${process.env.NODE_ENV}`);
       console.log(`Time: ${new Date().toISOString()}`);
       console.log('WebSocket server is running on path: /ws');
+      console.log('=================================');
+      
+      // Log the available endpoints for clients
+      console.log('Available WebSocket endpoint:');
+      console.log(`ws://localhost:${finalPort}/ws?userId=[id]&userType=[type]`);
       console.log('=================================');
     });
     
