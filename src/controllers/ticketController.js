@@ -534,7 +534,7 @@ exports.deleteTicket = async (req, res) => {
  */
 async function sendTicketConfirmationEmail(ticketData, userData) {
   // Формируем URL для отслеживания заявки
-  const trackingUrl = `${process.env.FRONTEND_URL || 'https://helpdesk-ten-omega.vercel.app'}/tickets/${ticketData.id}`;
+  const trackingUrl = `${process.env.FRONTEND_URL || 'https://helpdesk-client-iota.vercel.app'}/tickets/${ticketData.id}`;
   
   // Форматирование даты
   const formatDate = (date) => {

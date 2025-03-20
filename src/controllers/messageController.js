@@ -261,7 +261,7 @@ exports.addMessage = async (req, res) => {
       const recipientName = sender_type === 'staff' ? ticket.requester_name : ticket.assigned_to_name;
       
       try {
-        await sendMessagelNotification(ticket, responseMessage, {
+        await sendMessageNotification(ticket, responseMessage, {
           email: recipientEmail,
           name: recipientName
         });
