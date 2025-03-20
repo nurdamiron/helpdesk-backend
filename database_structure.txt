@@ -127,8 +127,10 @@ CREATE TABLE `ticket_history` (
   content text NOT NULL   
   content_type enum('text','html') NULL  DEFAULT text 
   is_internal tinyint(1) NULL  DEFAULT 0 
-  read_at timestamp NULL   
+  read_at timestamp NULL MUL  
   created_at timestamp NULL  DEFAULT CURRENT_TIMESTAMP DEFAULT_GENERATED
+  status enum('sent','delivered','read') NOT NULL MUL DEFAULT sent 
+  delivered_at timestamp NULL   
 
 Внешние ключи:
   ticket_messages_ibfk_1: ticket_messages.ticket_id -> tickets.id
@@ -136,6 +138,8 @@ CREATE TABLE `ticket_history` (
 Индексы:
   PRIMARY UNIQUE: (id)
   ticket_id : (ticket_id)
+  idx_ticket_messages_read_at : (read_at)
+  idx_ticket_messages_status : (status)
 
 SQL создания таблицы:
 CREATE TABLE `ticket_messages` (
@@ -148,8 +152,12 @@ CREATE TABLE `ticket_messages` (
   `is_internal` tinyint(1) DEFAULT '0',
   `read_at` timestamp NULL DEFAULT NULL,
   `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+  `status` enum('sent','delivered','read') NOT NULL DEFAULT 'sent',
+  `delivered_at` timestamp NULL DEFAULT NULL,
   PRIMARY KEY (`id`),
   KEY `ticket_id` (`ticket_id`),
+  KEY `idx_ticket_messages_read_at` (`read_at`),
+  KEY `idx_ticket_messages_status` (`status`),
   CONSTRAINT `ticket_messages_ibfk_1` FOREIGN KEY (`ticket_id`) REFERENCES `tickets` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 
