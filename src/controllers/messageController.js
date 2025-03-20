@@ -151,13 +151,46 @@ exports.addMessage = async (req, res) => {
         sender_type, 
         sender_id, 
         content, 
-        content_type
-      ) VALUES (?, ?, ?, ?, ?)
+        content_type,
+        status
+      ) VALUES (?, ?, ?, ?, ?, 'sent')
     `, [ticketId, sender_type, sender_id, body, 'text']);
     
     const messageId = result.insertId;
     console.log(`Создано сообщение с ID ${messageId}`);
     
+    // Отправляем уведомление через WebSocket
+try {
+  // Импортируем модуль сервера
+  const server = require('../../server');
+  
+  if (server && typeof server.broadcastUpdate === 'function') {
+    // Определяем получателя
+    const recipientType = sender_type === 'requester' ? 'staff' : 'requester';
+    const recipientId = recipientType === 'requester' ? ticket.requester_id : '1'; // ID первого сотрудника
+    
+    server.broadcastUpdate({
+      type: 'new_message',
+      message: {
+        id: message.id,
+        ticket_id: parseInt(ticketId),
+        content: message.content,
+        content_type: message.content_type,
+        created_at: message.created_at,
+        sender: {
+          id: message.sender.id,
+          name: message.sender.name,
+          type: message.sender.type
+        },
+        status: 'sent'
+      }
+    }, recipientType, recipientId);
+  }
+} catch (wsError) {
+  console.error('Ошибка отправки WebSocket уведомления:', wsError);
+  // Не блокируем основной процесс при ошибке WebSocket
+}
+
     // Если есть вложения, связываем их с сообщением
     if (attachments && attachments.length > 0) {
       console.log(`Связываем ${attachments.length} вложений с сообщением ${messageId}`);
@@ -391,6 +424,138 @@ async function sendMessageNotification(ticket, message, attachments = []) {
   // Отправляем письмо
   return await transporter.sendMail(mailOptions);
 }
+
+// Обновление статуса сообщения (доставлено/прочитано)
+exports.updateMessageStatus = async (req, res) => {
+  try {
+    const { messageId } = req.params;
+    const { status } = req.body;
+    
+    if (!['delivered', 'read'].includes(status)) {
+      return res.status(400).json({
+        status: 'error',
+        error: 'Недопустимый статус сообщения'
+      });
+    }
+    
+    // Проверяем существование сообщения
+    const [messages] = await pool.query(
+      'SELECT * FROM ticket_messages WHERE id = ?', 
+      [messageId]
+    );
+    
+    if (messages.length === 0) {
+      return res.status(404).json({
+        status: 'error',
+        error: 'Сообщение не найдено'
+      });
+    }
+    
+    const message = messages[0];
+    
+    // Обновляем статус и соответствующую временную метку
+    if (status === 'delivered' && !message.delivered_at) {
+      await pool.query(
+        'UPDATE ticket_messages SET status = ?, delivered_at = CURRENT_TIMESTAMP WHERE id = ?',
+        [status, messageId]
+      );
+    } else if (status === 'read' && !message.read_at) {
+      await pool.query(
+        'UPDATE ticket_messages SET status = ?, read_at = CURRENT_TIMESTAMP, delivered_at = COALESCE(delivered_at, CURRENT_TIMESTAMP) WHERE id = ?',
+        [status, messageId]
+      );
+    }
+    
+    // Получаем обновленное сообщение
+    const [updatedMessages] = await pool.query(
+      'SELECT * FROM ticket_messages WHERE id = ?',
+      [messageId]
+    );
+    
+    return res.json({
+      status: 'success',
+      message: updatedMessages[0]
+    });
+  } catch (error) {
+    console.error('Error updating message status:', error);
+    return res.status(500).json({
+      status: 'error',
+      error: 'Внутренняя ошибка сервера'
+    });
+  }
+};
+
+
+// Получение непрочитанных сообщений для пользователя
+exports.getUnreadMessages = async (req, res) => {
+  try {
+    const { userId, userType = 'staff' } = req.query;
+    
+    if (!userId) {
+      return res.status(400).json({
+        status: 'error',
+        error: 'ID пользователя обязателен'
+      });
+    }
+    
+    // Для сотрудников - получаем непрочитанные сообщения от клиентов
+    // Для клиентов - получаем непрочитанные сообщения от сотрудников
+    const senderType = userType === 'staff' ? 'requester' : 'staff';
+    
+    const [messages] = await pool.query(`
+      SELECT 
+        tm.*,
+        t.subject as ticket_subject,
+        CASE 
+          WHEN tm.sender_type='requester' THEN r.full_name
+          WHEN tm.sender_type='staff' THEN u.first_name
+          ELSE 'Unknown'
+        END as sender_name
+      FROM ticket_messages tm
+      JOIN tickets t ON tm.ticket_id = t.id
+      LEFT JOIN requesters r ON (tm.sender_type='requester' AND tm.sender_id = r.id)
+      LEFT JOIN users u ON (tm.sender_type='staff' AND tm.sender_id = u.id)
+      WHERE tm.read_at IS NULL
+      AND tm.sender_type = ?
+      AND ((? = 'staff') OR (? = 'requester' AND t.requester_id = ?))
+      ORDER BY tm.created_at DESC
+    `, [senderType, userType, userType, userId]);
+    
+    // Группируем сообщения по заявкам
+    const ticketGroups = {};
+    messages.forEach(message => {
+      if (!ticketGroups[message.ticket_id]) {
+        ticketGroups[message.ticket_id] = {
+          ticket_id: message.ticket_id,
+          subject: message.ticket_subject,
+          messages: []
+        };
+      }
+      
+      ticketGroups[message.ticket_id].messages.push({
+        id: message.id,
+        content: message.content,
+        sender_type: message.sender_type,
+        sender_id: message.sender_id,
+        sender_name: message.sender_name,
+        created_at: message.created_at
+      });
+    });
+    
+    return res.json({
+      status: 'success',
+      unreadCount: messages.length,
+      ticketGroups: Object.values(ticketGroups)
+    });
+  } catch (error) {
+    console.error('Error getting unread messages:', error);
+    return res.status(500).json({
+      status: 'error',
+      error: 'Внутренняя ошибка сервера'
+    });
+  }
+};
+
 
 // Отметить сообщения как прочитанные
 exports.markMessagesAsRead = async (req, res) => {

@@ -70,4 +70,12 @@ router.put('/tickets/:ticketId/messages/read', devAuth, messageController.markMe
 // Загрузка вложения
 router.post('/tickets/:ticketId/attachments', devAuth, upload.single('file'), messageController.uploadAttachment);
 
+// Обновление статуса сообщения
+router.put('/:messageId/status', devAuth, messageController.updateMessageStatus);
+
+// Получение непрочитанных сообщений
+router.get('/unread', devAuth, messageController.getUnreadMessages);
+
+
+
 module.exports = router;

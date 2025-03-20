@@ -90,12 +90,27 @@ const requestLogger = (req, res, next) => {
 app.use(requestLogger);
 
 // Подключение маршрутов
-app.use('/api/tickets', ticketRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/requesters', requesterRoutes);
+app.use('/api/messages', messageRoutes);
+app.use('/api/tickets', ticketRoutes);
+
+// Добавьте новый API endpoint для информации о чате
+app.get('/api/chat/info', (req, res) => {
+  res.json({
+    status: 'success',
+    websocketUrl: `${process.env.WS_URL || 'ws://localhost:' + PORT}/ws`,
+    features: {
+      typing_indicator: true,
+      read_receipts: true,
+      delivery_status: true,
+      file_uploads: true
+    }
+  });
+});
 
 // Корневой endpoint с информацией об API
 app.get('/', (req, res) => {

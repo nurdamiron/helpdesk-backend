@@ -68,4 +68,7 @@ router.post('/:ticketId/messages', devAuth, messageController.addMessage);
 router.put('/:ticketId/messages/read', devAuth, messageController.markMessagesAsRead);
 router.post('/:ticketId/attachments', devAuth, upload.single('file'), messageController.uploadAttachment);
 
+// Обновление статуса сообщения в контексте заявки
+router.put('/:ticketId/messages/:messageId/status', devAuth, messageController.updateMessageStatus);
+
 module.exports = router;
