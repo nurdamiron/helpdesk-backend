@@ -13,12 +13,12 @@ const userRoutes = require('./routes/userRoutes');
 const authRoutes = require('./routes/authRoutes');
 const chatRoutes = require('./routes/chatRoutes');
 const messageRoutes = require('./routes/messageRoutes');
-const requesterRoutes = require('./routes/requesterRoutes');
+const employeeRoutes = require('./routes/employeeRoutes');
 const app = express();
 
 // Конфигурация CORS
 const whitelist = [
-  'http://localhost:5000',
+  'http://localhost:5002',
   'http://localhost:3000',
   'http://localhost:3001',
   'http://localhost:3030',
@@ -94,8 +94,7 @@ app.use('/api/users', userRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/chat', chatRoutes);
 app.use('/api/messages', messageRoutes);
-app.use('/api/requesters', requesterRoutes);
-app.use('/api/messages', messageRoutes);
+app.use('/api/employees', employeeRoutes);
 app.use('/api/tickets', ticketRoutes);
 
 // Добавьте новый API endpoint для информации о чате
@@ -231,7 +230,7 @@ app.use('*', (req, res) => {
 });
 
 // Установка порта и запуск сервера
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5002;
 
 // Проверка соединения с базой данных перед запуском сервера
 pool.testConnection().then(isConnected => {

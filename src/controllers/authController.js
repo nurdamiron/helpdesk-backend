@@ -1,5 +1,5 @@
 // src/controllers/authController.js
-const pool = require('../config/database');
+const pool = require('../services/pool');
 
 const authController = {
   // Регистрация пользователя

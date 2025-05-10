@@ -1,176 +1,163 @@
 // src/controllers/ticketController.js
-const pool = require('../config/database');
 const nodemailer = require('nodemailer');
+const pool = require('../config/database');
+const { sendTicketCreationNotification } = require('../utils/emailService');
 
-// Маппинги для локализации — при желании можно убрать
+// Маппинги для локализации
 const CATEGORY_MAP = {
-  'repair': 'Ремонтные работы',
+  'repair': 'Жөндеу жұмыстары',
   'plumbing': 'Сантехника',
   'electrical': 'Электрика',
-  'construction': 'Строительство',
-  'design': 'Проектирование',
-  'consultation': 'Консультация',
-  'estimate': 'Смета и расчеты',
-  'materials': 'Материалы',
-  'warranty': 'Гарантийный случай',
-  'other': 'Другое'
+  'construction': 'Құрылыс',
+  'design': 'Жобалау',
+  'consultation': 'Кеңес беру',
+  'estimate': 'Смета және есептеулер',
+  'materials': 'Материалдар',
+  'warranty': 'Кепілдік жағдайы',
+  'other': 'Басқа'
 };
 
 const PRIORITY_MAP = {
-  'low': 'Низкий',
-  'medium': 'Средний',
-  'high': 'Высокий',
-  'urgent': 'Срочный'
+  'low': 'Төмен',
+  'medium': 'Орташа',
+  'high': 'Жоғары',
+  'urgent': 'Шұғыл'
 };
 
 const STATUS_MAP = {
-  'new': 'Новый',
-  'in_progress': 'В работе',
-  'pending': 'Ожидает ответа',
-  'resolved': 'Решен',
-  'closed': 'Закрыт'
+  'new': 'Жаңа', // Новый
+  'in_review': 'Қарастыру үстінде', // На рассмотрении
+  'in_progress': 'Жұмыс істеуде', // В работе
+  'pending': 'Жауап күтілуде', // Ожидает ответа
+  'resolved': 'Шешілген', // Решен
+  'closed': 'Жабылған' // Закрыт
+};
+
+const TYPE_MAP = {
+  'complaint': 'Шағым', // Жалоба
+  'suggestion': 'Ұсыныс', // Предложение
+  'request': 'Сұраныс', // Запрос
+  'other': 'Басқа' // Другое
 };
 
 const PROPERTY_TYPE_MAP = {
-  'apartment': 'Квартира',
-  'house': 'Частный дом',
-  'office': 'Офис',
-  'commercial': 'Коммерческое помещение',
-  'land': 'Земельный участок',
-  'other': 'Другое'
+  'apartment': 'Пәтер', // Квартира
+  'house': 'Жеке үй', // Частный дом
+  'office': 'Офис', // Офис
+  'commercial': 'Коммерциялық жай', // Коммерческое помещение
+  'land': 'Жер учаскесі', // Земельный участок
+  'other': 'Басқа' // Другое
 };
 
-// Настраиваем transporter для отправки почты
+// Создаем транспорт для отправки почты
 const transporter = nodemailer.createTransport({
-  service: 'gmail',
+  host: process.env.SMTP_HOST || 'smtp.gmail.com',
+  port: process.env.SMTP_PORT || 587,
+  secure: process.env.SMTP_SECURE === 'true' ? true : false,
   auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD
+      user: process.env.SMTP_USER || process.env.EMAIL_USER,
+      pass: process.env.SMTP_PASSWORD || process.env.EMAIL_PASSWORD
   }
 });
 
-// Создание тикета
+// Создание заявки
 exports.createTicket = async (req, res) => {
   try {
-    const {
-      subject,
-      description,
-      priority = 'medium',
-      category = 'other',
+    const { 
+      subject, 
+      description, 
+      type = 'request', 
+      priority = 'medium', 
+      category = 'general',
       metadata = {}
     } = req.body;
 
     if (!subject || !description) {
-      return res.status(400).json({ error: 'Тема и описание обязательны' });
+      return res.status(400).json({ 
+        status: 'error',
+        error: 'Тақырып және сипаттама міндетті өрістер болып табылады' // Тема и описание являются обязательными полями
+      });
     }
 
-    // Проверяем/создаём requesters (заявителя)
-    let requesterId = null;
-    const requesterData = metadata.requester || {};
-    if (requesterData.email) {
-      // Ищем в requesters
-      const [existing] = await pool.query('SELECT id FROM requesters WHERE email = ?', [requesterData.email]);
-      if (existing.length) {
-        requesterId = existing[0].id;
-        // Обновим
-        await pool.query(
-          `UPDATE requesters SET full_name = ?, phone = ?, preferred_contact = ?, updated_at = CURRENT_TIMESTAMP
-           WHERE id = ?`,
-          [
-            requesterData.full_name || null,
-            requesterData.phone || null,
-            requesterData.preferred_contact || 'email',
-            requesterId
-          ]
-        );
-      } else {
-        // Создадим
-        const [ins] = await pool.query(
-          `INSERT INTO requesters (email, full_name, phone, preferred_contact)
-           VALUES (?, ?, ?, ?)`,
-          [
-            requesterData.email,
-            requesterData.full_name || null,
-            requesterData.phone || null,
-            requesterData.preferred_contact || 'email'
-          ]
-        );
-        requesterId = ins.insertId;
-      }
+    // Преобразование объектов в JSON строки, если они переданы как объекты
+    const metadataJSON = typeof metadata === 'string' ? metadata : JSON.stringify({
+      ...metadata,
+      type: type // Добавляем тип в metadata
+    });
+    
+    // Получаем данные сотрудника из metadata, если есть
+    let requesterMetadataJSON = '{}';
+    if (metadata.employee) {
+      requesterMetadataJSON = JSON.stringify(metadata.employee);
     }
 
-    // Информация об объекте
-    const propertyData = metadata.property || {};
-
-    // Создаём запись в tickets
+    // Вставка заявки
     const [result] = await pool.query(
-      `INSERT INTO tickets
-       (subject, description, status, priority, category, requester_id,
-        property_type, property_address, property_area)
-       VALUES (?, ?, 'new', ?, ?, ?, ?, ?, ?)`,
-      [
-        subject,
-        description,
-        priority,
-        category,
-        requesterId,
-        propertyData.type || 'apartment',
-        propertyData.address || null,
-        propertyData.area ? parseFloat(propertyData.area) : null
-      ]
+      `INSERT INTO tickets (subject, description, priority, category, status, metadata, requester_metadata) 
+       VALUES (?, ?, ?, ?, 'new', ?, ?)`,
+      [subject, description, priority, category, metadataJSON, requesterMetadataJSON]
     );
-    const ticketId = result.insertId;
 
-    // Если есть requesterId — добавим первое сообщение от него в ticket_messages
-    if (requesterId) {
-      await pool.query(
-        `INSERT INTO ticket_messages
-         (ticket_id, sender_type, sender_id, content, content_type)
-         VALUES (?, 'requester', ?, ?, 'text')`,
-        [ticketId, requesterId, description]
-      );
-    }
+    // Получаем данные заявки для ответа
+    const [ticketRows] = await pool.query('SELECT * FROM tickets WHERE id = ?', [result.insertId]);
+    
+    const ticket = ticketRows[0];
 
-    // Отправка почтового уведомления — можно оставить или убрать
-    if (requesterData.email) {
+    // Извлекаем данные пользователя из requester_metadata
+    let userData = {};
+    if (ticket.requester_metadata) {
       try {
-        await sendTicketConfirmationEmail({
-          id: ticketId,
-          subject,
-          description,
-          status: 'new',
-          priority,
-          category,
-          created_at: new Date()
-        }, {
-          email: requesterData.email,
-          full_name: requesterData.full_name || 'Клиент',
-          phone: requesterData.phone || null,
-          property: {
-            type: propertyData.type,
-            address: propertyData.address,
-            area: propertyData.area
-          }
-        });
-      } catch (emailErr) {
-        console.error('Ошибка отправки уведомления по email:', emailErr);
+        // Проверяем, является ли requester_metadata уже объектом
+        const requesterMetadata = typeof ticket.requester_metadata === 'object' && ticket.requester_metadata !== null
+          ? ticket.requester_metadata
+          : JSON.parse(ticket.requester_metadata);
+          
+        if (requesterMetadata.requester) {
+          userData = requesterMetadata.requester;
+        } else if (requesterMetadata.employee) {
+          userData = requesterMetadata.employee;
+        } else {
+          userData = requesterMetadata;
+        }
+      } catch (e) {
+        console.error('Ошибка при разборе requester_metadata:', e);
+        // При ошибке парсинга используем данные из запроса если они есть
+        if (metadata.employee) {
+          userData = metadata.employee;
+        }
       }
     }
 
-    return res.status(201).json({
-      ticket: {
-        id: ticketId,
-        subject,
-        description,
-        status: 'new',
-        priority,
-        category,
-        created_at: new Date().toISOString()
+    // Отправляем письмо-подтверждение, если есть email
+    let emailSent = false;
+    if (userData.email) {
+      try {
+        // Используем новую функцию отправки уведомлений
+        await sendTicketCreationNotification(userData.email, ticket);
+        console.log(`Өтініш туралы хабарлама ${userData.email} адресіне жіберілді`);
+        emailSent = true;
+      } catch (emailError) {
+        console.error('Email жіберу кезінде қате:', emailError);
+        // Продолжаем выполнение, даже если не удалось отправить письмо
       }
+    }
+
+    // Добавляем статус отправки email в заголовки ответа
+    res.set('X-Email-Sent', emailSent ? 'true' : 'false');
+    
+    return res.status(201).json({
+      status: 'success',
+      message: 'Өтініш сәтті құрылды', // Заявка успешно создана
+      email_sent: emailSent, // Добавляем статус отправки email в ответ
+      ticket
     });
   } catch (error) {
     console.error('Ошибка createTicket:', error);
-    return res.status(500).json({ error: 'Ошибка при создании заявки' });
+    return res.status(500).json({ 
+      status: 'error',
+      error: 'Өтінішті құру кезінде қате пайда болды', // Ошибка при создании заявки 
+      details: error.message
+    });
   }
 };
 
@@ -179,6 +166,7 @@ exports.getTickets = async (req, res) => {
   try {
     const {
       status,
+      type,
       priority,
       category,
       search,
@@ -193,14 +181,15 @@ exports.getTickets = async (req, res) => {
     const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
     const offset = (page - 1) * limit;
 
+    // Изменяем запрос, чтобы не требовалась таблица employees
     let query = `
       SELECT
         t.*,
-        r.email as requester_email,
-        r.full_name as requester_name,
-        r.phone as requester_phone
+        COALESCE(u.first_name, '') as assigned_first_name,
+        COALESCE(u.last_name, '') as assigned_last_name
       FROM tickets t
-      LEFT JOIN requesters r ON t.requester_id = r.id
+      LEFT JOIN users u ON t.assigned_to = u.id
+      WHERE 1=1
     `;
     const whereConditions = [];
     const params = [];
@@ -208,6 +197,11 @@ exports.getTickets = async (req, res) => {
     if (status) {
       whereConditions.push('t.status = ?');
       params.push(status);
+    }
+    // Для фильтрации по типу нужно использовать JSON_EXTRACT, если тип хранится в metadata
+    if (type) {
+      whereConditions.push("JSON_EXTRACT(t.metadata, '$.type') = ?");
+      params.push(type);
     }
     if (priority) {
       whereConditions.push('t.priority = ?');
@@ -218,54 +212,69 @@ exports.getTickets = async (req, res) => {
       params.push(category);
     }
     if (search) {
-      whereConditions.push('(t.subject LIKE ? OR t.description LIKE ? OR r.full_name LIKE ? OR r.email LIKE ?)');
+      whereConditions.push('(t.subject LIKE ? OR t.description LIKE ?)');
       const s = `%${search}%`;
-      params.push(s, s, s, s);
+      params.push(s, s);
     }
 
     if (whereConditions.length) {
-      query += ' WHERE ' + whereConditions.join(' AND ');
+      query += ' AND ' + whereConditions.join(' AND ');
     }
 
-    // Считаем общее кол-во
+    // Считаем общее кол-во без использования таблицы employees
     const countQuery = `
       SELECT COUNT(*) as total
       FROM tickets t
-      LEFT JOIN requesters r ON t.requester_id = r.id
       ${whereConditions.length ? ' WHERE ' + whereConditions.join(' AND ') : ''}
     `;
-    const [countResult] = await pool.query(countQuery, params);
-    const totalTickets = countResult[0].total;
 
-    // Добавляем сортировку и лимит
+    const [totalRows] = await pool.query(countQuery, params);
+    const total = totalRows[0].total;
+
     query += ` ORDER BY t.${sortField} ${sortOrder} LIMIT ? OFFSET ?`;
-    params.push(parseInt(limit), parseInt(offset));
+    params.push(parseInt(limit), offset);
 
     const [rows] = await pool.query(query, params);
 
-    // Форматируем
-    const tickets = rows.map(t => ({
-      ...t,
-      requester: t.requester_id
-        ? {
-          id: t.requester_id,
-          email: t.requester_email,
-          full_name: t.requester_name,
-          phone: t.requester_phone
+    // Преобразуем результаты для включения локализованных текстов
+    const result = rows.map(ticket => {
+      let ticketType = 'request'; // Тип по умолчанию
+      
+      // Извлекаем тип из metadata, если он там есть
+      if (ticket.metadata) {
+        try {
+          const metadata = JSON.parse(ticket.metadata);
+          if (metadata.type) {
+            ticketType = metadata.type;
+          }
+        } catch (e) {
+          console.error('Ошибка при парсинге metadata:', e);
         }
-        : null
-    }));
+      }
+      
+      return {
+        ...ticket,
+        type: ticketType,
+        status_text: STATUS_MAP[ticket.status] || ticket.status,
+        priority_text: PRIORITY_MAP[ticket.priority] || ticket.priority,
+        category_text: CATEGORY_MAP[ticket.category] || ticket.category,
+        type_text: TYPE_MAP[ticketType] || ticketType,
+        property_type_text: PROPERTY_TYPE_MAP[ticket.property_type] || ticket.property_type,
+      };
+    });
 
     return res.json({
-      data: tickets,
-      total: totalTickets,
+      total,
       page: parseInt(page),
       limit: parseInt(limit),
-      totalPages: Math.ceil(totalTickets / limit)
+      tickets: result
     });
   } catch (error) {
     console.error('Ошибка получения списка заявок:', error);
-    return res.status(500).json({ error: 'Ошибка при получении заявок' });
+    return res.status(500).json({ 
+      error: 'Ошибка при получении списка заявок',
+      details: error.message
+    });
   }
 };
 
@@ -273,69 +282,94 @@ exports.getTickets = async (req, res) => {
 exports.getTicketById = async (req, res) => {
   try {
     const { id } = req.params;
-    const [tickets] = await pool.query(`
-      SELECT
-        t.*,
-        r.email as requester_email,
-        r.full_name as requester_name,
-        r.phone as requester_phone
-      FROM tickets t
-      LEFT JOIN requesters r ON t.requester_id = r.id
-      WHERE t.id = ?
-    `, [id]);
 
-    if (!tickets.length) {
-      return res.status(404).json({ error: 'Заявка не найдена' });
+    // Получаем данные заявки без JOIN с таблицей employees
+    const [tickets] = await pool.query(
+      `SELECT * FROM tickets WHERE id = ?`,
+      [id]
+    );
+
+    if (tickets.length === 0) {
+      return res.status(404).json({ 
+        status: 'error',
+        error: 'Өтініш табылмады' // Заявка не найдена 
+      });
     }
+
     const ticket = tickets[0];
+    let ticketType = 'request'; // Тип по умолчанию
 
-    // Сообщения
-    const [messages] = await pool.query(`
-      SELECT
-        tm.*,
-        CASE WHEN tm.sender_type='requester' THEN r.full_name
-             WHEN tm.sender_type='staff' THEN u.first_name
-             ELSE 'Unknown'
-        END as sender_name
-      FROM ticket_messages tm
-      LEFT JOIN requesters r ON (tm.sender_type='requester' AND tm.sender_id = r.id)
-      LEFT JOIN users u ON (tm.sender_type='staff' AND tm.sender_id = u.id)
-      WHERE tm.ticket_id = ?
-      ORDER BY tm.created_at ASC
-    `, [id]);
+    // Если есть metadata, парсим его для получения типа
+    if (ticket.metadata) {
+      try {
+        const metadata = JSON.parse(ticket.metadata);
+        if (metadata.type) {
+          ticketType = metadata.type;
+        }
+      } catch (e) {
+        console.error('Ошибка парсинга metadata:', e);
+      }
+    }
+    
+    // Добавляем тип в объект заявки
+    ticket.type = ticketType;
 
-    // Вложения
-    const [attachments] = await pool.query(`
-      SELECT * FROM ticket_attachments
-      WHERE ticket_id = ?
-      ORDER BY created_at DESC
-    `, [id]);
+    // Если есть requester_metadata, парсим его
+    if (ticket.requester_metadata) {
+      try {
+        ticket.requester = JSON.parse(ticket.requester_metadata);
+      } catch (e) {
+        console.error('Ошибка парсинга requester_metadata:', e);
+        ticket.requester = null;
+      }
+    } else {
+      ticket.requester = null;
+    }
+
+    // Если есть assigned_to, получим данные исполнителя
+    if (ticket.assigned_to) {
+      const [users] = await pool.query(
+        `SELECT id, first_name, last_name, email, role FROM users WHERE id = ?`,
+        [ticket.assigned_to]
+      );
+      ticket.assigned_user = users.length ? users[0] : null;
+    } else {
+      ticket.assigned_user = null;
+    }
+
+    // Попробуем получить сообщения заявки
+    try {
+      const [messages] = await pool.query(
+        `SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY created_at ASC`,
+        [id]
+      );
+      ticket.messages = messages;
+    } catch (error) {
+      // Если таблицы нет или другая ошибка, просто вернем пустой массив
+      console.log('Не удалось получить сообщения:', error.message);
+      ticket.messages = [];
+    }
+
+    // Добавляем локализованные тексты
+    ticket.status_text = STATUS_MAP[ticket.status] || ticket.status;
+    ticket.priority_text = PRIORITY_MAP[ticket.priority] || ticket.priority;
+    ticket.category_text = CATEGORY_MAP[ticket.category] || ticket.category;
+    ticket.type_text = TYPE_MAP[ticket.type] || ticket.type;
+    if (ticket.property_type) {
+      ticket.property_type_text = PROPERTY_TYPE_MAP[ticket.property_type] || ticket.property_type;
+    }
 
     return res.json({
-      ticket: {
-        ...ticket,
-        requester: ticket.requester_id
-          ? {
-            id: ticket.requester_id,
-            email: ticket.requester_email,
-            full_name: ticket.requester_name,
-            phone: ticket.requester_phone
-          }
-          : null,
-        messages: messages.map(m => ({
-          ...m,
-          sender: {
-            id: m.sender_id,
-            name: m.sender_name,
-            type: m.sender_type
-          }
-        })),
-        attachments
-      }
+      status: 'success',
+      ticket
     });
   } catch (error) {
     console.error('Ошибка getTicketById:', error);
-    return res.status(500).json({ error: 'Ошибка при получении заявки' });
+    return res.status(500).json({ 
+      status: 'error',
+      error: 'Өтінішті алу кезінде қате пайда болды', // Ошибка при получении заявки
+      details: error.message
+    });
   }
 };
 
@@ -349,74 +383,139 @@ exports.updateTicket = async (req, res) => {
       status,
       priority,
       category,
+      type,
       assigned_to,
-      property_type,
-      property_address,
-      property_area
+      deadline,
+      metadata = {}
     } = req.body;
 
-    // Проверяем, что заявка есть
-    const [existing] = await pool.query('SELECT * FROM tickets WHERE id = ?', [id]);
-    if (!existing.length) {
-      return res.status(404).json({ error: 'Заявка не найдена' });
+    // Сначала проверим существование заявки
+    const [checkResult] = await pool.query('SELECT id, metadata FROM tickets WHERE id = ?', [id]);
+    if (checkResult.length === 0) {
+      return res.status(404).json({ 
+        status: 'error',
+        error: 'Өтініш табылмады' // Заявка не найдена
+      });
     }
 
-    let updateQuery = 'UPDATE tickets SET updated_at=CURRENT_TIMESTAMP';
-    const params = [];
-
-    if (subject !== undefined) {
-      updateQuery += ', subject=?';
-      params.push(subject);
-    }
-    if (description !== undefined) {
-      updateQuery += ', description=?';
-      params.push(description);
-    }
-    if (status !== undefined) {
-      updateQuery += ', status=?';
-      params.push(status);
-    }
-    if (priority !== undefined) {
-      updateQuery += ', priority=?';
-      params.push(priority);
-    }
-    if (category !== undefined) {
-      updateQuery += ', category=?';
-      params.push(category);
-    }
-    // Поле assigned_to можно удалять или оставить, если нужно, но у нас нет сотрудников
-    if (property_type !== undefined) {
-      updateQuery += ', property_type=?';
-      params.push(property_type);
-    }
-    if (property_address !== undefined) {
-      updateQuery += ', property_address=?';
-      params.push(property_address);
-    }
-    if (property_area !== undefined) {
-      updateQuery += ', property_area=?';
-      params.push(property_area !== null ? parseFloat(property_area) : null);
-    }
-
-    updateQuery += ' WHERE id=?';
-    params.push(id);
-
-    if (params.length > 1) {
-      const [upd] = await pool.query(updateQuery, params);
-      if (!upd.affectedRows) {
-        return res.status(404).json({ error: 'Обновление не выполнено' });
+    // Получаем текущие метаданные
+    let currentMetadata = {};
+    if (checkResult[0].metadata) {
+      try {
+        currentMetadata = JSON.parse(checkResult[0].metadata);
+      } catch (e) {
+        console.error('Ошибка парсинга metadata в updateTicket:', e);
       }
     }
 
-    // Возвращаем свежую версию
-    const [updatedTicket] = await pool.query('SELECT * FROM tickets WHERE id=?', [id]);
+    // Обновляем метаданные с новым типом, если он передан
+    const updatedMetadata = {
+      ...currentMetadata,
+      ...(metadata.additional || {}),
+    };
+    
+    if (type !== undefined) {
+      updatedMetadata.type = type;
+    }
+
+    // Формируем запрос обновления
+    const updateFields = [];
+    const updateValues = [];
+
+    if (subject !== undefined) {
+      updateFields.push('subject = ?');
+      updateValues.push(subject);
+    }
+    if (description !== undefined) {
+      updateFields.push('description = ?');
+      updateValues.push(description);
+    }
+    if (status !== undefined) {
+      updateFields.push('status = ?');
+      updateValues.push(status);
+    }
+    if (priority !== undefined) {
+      updateFields.push('priority = ?');
+      updateValues.push(priority);
+    }
+    if (category !== undefined) {
+      updateFields.push('category = ?');
+      updateValues.push(category);
+    }
+    if (assigned_to !== undefined) {
+      updateFields.push('assigned_to = ?');
+      updateValues.push(assigned_to);
+    }
+    if (deadline !== undefined) {
+      updateFields.push('deadline = ?');
+      updateValues.push(deadline);
+    }
+
+    // Обновляем metadata с типом
+    updateFields.push('metadata = ?');
+    updateValues.push(JSON.stringify(updatedMetadata));
+
+    // Если пришли новые данные о заявителе, обновляем requester_metadata
+    if (metadata.requester || metadata.employee) {
+      const requesterData = metadata.requester || metadata.employee || {};
+      updateFields.push('requester_metadata = ?');
+      updateValues.push(JSON.stringify(requesterData));
+    }
+
+    // Добавляем timestamp обновления и ID заявки
+    updateFields.push('updated_at = CURRENT_TIMESTAMP');
+    updateValues.push(id);
+
+    // Выполняем запрос обновления
+    const query = `UPDATE tickets SET ${updateFields.join(', ')} WHERE id = ?`;
+    const [updateResult] = await pool.query(query, [...updateValues, id]);
+
+    if (updateResult.affectedRows === 0) {
+      return res.status(500).json({ 
+        status: 'error',
+        error: 'Өтінішті жаңарту мүмкін болмады' // Не удалось обновить заявку
+      });
+    }
+
+    // Получаем обновленные данные заявки
+    const [tickets] = await pool.query('SELECT * FROM tickets WHERE id = ?', [id]);
+    const ticket = tickets[0];
+
+    // Добавляем тип из метаданных
+    let ticketType = 'request'; // Тип по умолчанию
+    if (ticket.metadata) {
+      try {
+        const metadata = JSON.parse(ticket.metadata);
+        if (metadata.type) {
+          ticketType = metadata.type;
+        }
+      } catch (e) {
+        console.error('Ошибка парсинга metadata:', e);
+      }
+    }
+    ticket.type = ticketType;
+
+    // Добавляем локализованные тексты
+    ticket.status_text = STATUS_MAP[ticket.status] || ticket.status;
+    ticket.priority_text = PRIORITY_MAP[ticket.priority] || ticket.priority;
+    ticket.category_text = CATEGORY_MAP[ticket.category] || ticket.category;
+    ticket.type_text = TYPE_MAP[ticket.type] || ticket.type;
+    if (ticket.property_type) {
+      ticket.property_type_text = PROPERTY_TYPE_MAP[ticket.property_type] || ticket.property_type;
+    }
+
     return res.json({
-      message: 'Заявка успешно обновлена',
-      ticket: updatedTicket[0]
+      status: 'success',
+      message: 'Өтініш сәтті жаңартылды', // Заявка успешно обновлена
+      ticket
     });
   } catch (error) {
     console.error('Ошибка updateTicket:', error);
-    return res.status(500).json({ error: 'Ошибка при обновлении заявки' });
+    return res.status(500).json({ 
+      status: 'error',
+      error: 'Өтінішті жаңарту кезінде қате пайда болды', // Ошибка при обновлении заявки
+      details: error.message
+    });
   }
 };
 
@@ -516,230 +615,101 @@ exports.uploadAttachment = async (req, res) => {
 exports.deleteTicket = async (req, res) => {
   try {
     const { id } = req.params;
-    const [result] = await pool.query('DELETE FROM tickets WHERE id=?', [id]);
-    if (!result.affectedRows) {
-      return res.status(404).json({ error: 'Заявка не найдена' });
+
+    // Проверяем, существует ли заявка
+    const [checkResult] = await pool.query('SELECT id FROM tickets WHERE id = ?', [id]);
+    if (checkResult.length === 0) {
+      return res.status(404).json({ 
+        status: 'error',
+        error: 'Өтініш табылмады' // Заявка не найдена
+      });
     }
-    return res.json({ message: 'Заявка удалена' });
+
+    // Удаляем заявку
+    const [deleteResult] = await pool.query('DELETE FROM tickets WHERE id = ?', [id]);
+    
+    if (deleteResult.affectedRows === 0) {
+      return res.status(500).json({ 
+        status: 'error',
+        error: 'Өтінішті жою мүмкін болмады' // Не удалось удалить заявку
+      });
+    }
+
+    // Пробуем удалить связанные сообщения и вложения (если такие таблицы существуют)
+    try {
+      await pool.query('DELETE FROM ticket_messages WHERE ticket_id = ?', [id]);
+    } catch (error) {
+      console.log('Не удалось удалить сообщения:', error.message);
+    }
+
+    try {
+      await pool.query('DELETE FROM ticket_attachments WHERE ticket_id = ?', [id]);
+    } catch (error) {
+      console.log('Не удалось удалить вложения:', error.message);
+    }
+
+    return res.json({
+      status: 'success',
+      message: 'Өтініш сәтті жойылды' // Заявка успешно удалена
+    });
   } catch (error) {
     console.error('Ошибка deleteTicket:', error);
-    return res.status(500).json({ error: 'Ошибка при удалении заявки' });
+    return res.status(500).json({ 
+      status: 'error',
+      error: 'Өтінішті жою кезінде қате пайда болды', // Ошибка при удалении заявки
+      details: error.message
+    });
   }
 };
 
 /**
- * Отправка письма-подтверждения о создании заявки
- * @param {Object} ticketData - Данные заявки
- * @param {Object} userData - Данные пользователя
+ * Обновляет статус заявки (без аутентификации)
+ * @param {Object} req - HTTP запрос
+ * @param {Object} res - HTTP ответ
+ * @returns {Object} Результат операции
  */
-async function sendTicketConfirmationEmail(ticketData, userData) {
-  // Формируем URL для отслеживания заявки
-  const trackingUrl = `${process.env.FRONTEND_URL || 'https://helpdesk-client-iota.vercel.app'}/tickets/${ticketData.id}`;
-  
-  // Форматирование даты
-  const formatDate = (date) => {
-    return new Date(date).toLocaleString('ru-RU', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+exports.updateTicketStatus = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const numericId = parseInt(id, 10);
+    const { status } = req.body;
+    
+    if (!status) {
+      return res.status(400).json({ error: 'Status is required' });
+    }
+    
+    // Проверяем существование заявки
+    const [tickets] = await pool.query('SELECT * FROM tickets WHERE id = ?', [numericId]);
+    if (!tickets.length) {
+      return res.status(404).json({ error: 'Ticket not found' });
+    }
+    
+    const [upd] = await pool.query(
+      'UPDATE tickets SET status = ?, updated_at = NOW() WHERE id = ?',
+      [status, numericId]
+    );
+    
+    if (!upd.affectedRows) {
+      return res.status(404).json({ 
+        status: 'error',
+        error: 'Заявка не найдена или статус не изменен'
+      });
+    }
+
+    // Возвращаем обновленную заявку
+    const [updated] = await pool.query('SELECT * FROM tickets WHERE id = ?', [numericId]);
+    
+    return res.json({
+      status: 'success',
+      message: 'Статус заявки успешно обновлен',
+      ticket: updated[0]
     });
-  };
-  
-  // HTML-содержимое письма
-  const htmlContent = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <style>
-        body {
-          font-family: Arial, Helvetica, sans-serif;
-          line-height: 1.6;
-          color: #333;
-          margin: 0;
-          padding: 0;
-        }
-        
-        .container {
-          max-width: 600px;
-          margin: 0 auto;
-          padding: 20px;
-          background-color: #f9f9f9;
-        }
-        
-        .header {
-          background: linear-gradient(135deg, #ff6600, #cc5200);
-          color: white;
-          padding: 30px;
-          text-align: center;
-          border-radius: 5px 5px 0 0;
-        }
-        
-        .content {
-          background: white;
-          padding: 30px;
-          border-radius: 0 0 5px 5px;
-          box-shadow: 0 2px 5px rgba(0,0,0,0.1);
-        }
-        
-        .ticket-info {
-          background-color: #f5f5f5;
-          border-left: 4px solid #ff6600;
-          padding: 15px;
-          margin: 20px 0;
-        }
-        
-        .button {
-          display: inline-block;
-          padding: 12px 30px;
-          background: #ff6600;
-          color: white;
-          text-decoration: none;
-          border-radius: 5px;
-          margin: 20px 0;
-          font-weight: bold;
-          text-align: center;
-        }
-        
-        .footer {
-          text-align: center;
-          margin-top: 20px;
-          color: #666;
-          font-size: 12px;
-        }
-        
-        table {
-          width: 100%;
-          border-collapse: collapse;
-          margin: 15px 0;
-        }
-        
-        th, td {
-          padding: 12px;
-          text-align: left;
-          border-bottom: 1px solid #ddd;
-        }
-        
-        th {
-          background-color: #f2f2f2;
-          font-weight: bold;
-          width: 30%;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="container">
-        <div class="header">
-          <h1>Строительная Помощь</h1>
-          <p>Портал клиентской поддержки</p>
-        </div>
-        <div class="content">
-          <h2>Спасибо за вашу заявку!</h2>
-          <p>Уважаемый(ая) <strong>${userData.full_name || 'Клиент'}</strong>,</p>
-          <p>Ваша заявка успешно создана и принята в обработку. Наши специалисты свяжутся с вами в ближайшее время.</p>
-          
-          <div class="ticket-info">
-            <h3>Информация о заявке</h3>
-            <table>
-              <tr>
-                <th>Номер заявки:</th>
-                <td>#${ticketData.id}</td>
-              </tr>
-              <tr>
-                <th>Тема:</th>
-                <td>${ticketData.subject}</td>
-              </tr>
-              <tr>
-                <th>Категория:</th>
-                <td>${CATEGORY_MAP[ticketData.category] || ticketData.category}</td>
-              </tr>
-              <tr>
-                <th>Приоритет:</th>
-                <td>${PRIORITY_MAP[ticketData.priority] || ticketData.priority}</td>
-              </tr>
-              <tr>
-                <th>Дата создания:</th>
-                <td>${formatDate(ticketData.created_at)}</td>
-              </tr>
-            </table>
-            
-            <h3>Описание заявки:</h3>
-            <p>${ticketData.description}</p>
-            
-            <h3>Ваши контактные данные:</h3>
-            <table>
-              <tr>
-                <th>ФИО:</th>
-                <td>${userData.full_name || '-'}</td>
-              </tr>
-              <tr>
-                <th>Email:</th>
-                <td>${userData.email}</td>
-              </tr>
-              ${userData.phone ? `
-              <tr>
-                <th>Телефон:</th>
-                <td>${userData.phone}</td>
-              </tr>` : ''}
-            </table>
-            
-            ${userData.property ? `
-            <h3>Информация об объекте:</h3>
-            <table>
-              ${userData.property.type ? `
-              <tr>
-                <th>Тип объекта:</th>
-                <td>${PROPERTY_TYPE_MAP[userData.property.type] || userData.property.type}</td>
-              </tr>` : ''}
-              ${userData.property.address ? `
-              <tr>
-                <th>Адрес:</th>
-                <td>${userData.property.address}</td>
-              </tr>` : ''}
-              ${userData.property.area ? `
-              <tr>
-                <th>Площадь:</th>
-                <td>${userData.property.area} м²</td>
-              </tr>` : ''}
-            </table>` : ''}
-          </div>
-          
-          <p>Для отслеживания статуса вашей заявки, вы можете перейти по ссылке ниже:</p>
-          <div style="text-align: center;">
-            <a href="${trackingUrl}" class="button">Отслеживать заявку</a>
-          </div>
-          
-          <p>Ожидаемые сроки обработки заявок:</p>
-          <ul>
-            <li>Первичная обработка: до 24 часов</li>
-            <li>Консультации: 1-2 рабочих дня</li>
-            <li>Сложные запросы: до 5 рабочих дней</li>
-          </ul>
-          
-          <p>Если у вас возникнут вопросы, вы можете связаться с нами по указанным на сайте контактам.</p>
-          
-          <p>С уважением,<br>Команда Строительной Помощи</p>
-        </div>
-        <div class="footer">
-          <p>© ${new Date().getFullYear()} Строительная Помощь. Все права защищены.</p>
-          <p>Это автоматическое уведомление. Пожалуйста, не отвечайте на это письмо.</p>
-        </div>
-      </div>
-    </body>
-    </html>
-  `;
-  
-  // Настройки письма
-  const mailOptions = {
-    from: `"Строительная Помощь" <${process.env.EMAIL_USER}>`,
-    to: userData.email,
-    subject: `Заявка #${ticketData.id} успешно создана - Строительная Помощь`,
-    html: htmlContent
-  };
-  
-  // Отправляем письмо
-  return await transporter.sendMail(mailOptions);
-}
+    
+  } catch (error) {
+    console.error('Error updateTicketStatus:', error);
+    return res.status(500).json({ 
+      status: 'error',
+      error: 'Ошибка сервера при обновлении статуса'
+    });
+  }
+};

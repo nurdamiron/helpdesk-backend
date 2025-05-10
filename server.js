@@ -10,7 +10,7 @@ const webSocketManager = require('./src/services/WebSocketManager');
  * Порт для запуска сервера
  * Серверді іске қосу порты
  */
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5002;
 
 /**
  * Проверка доступности порта

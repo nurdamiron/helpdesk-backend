@@ -4,7 +4,7 @@ const router = express.Router();
 const messageController = require('../controllers/messageController');
 const multer = require('multer');
 const path = require('path');
-const auth = require('../middleware/auth'); // Убедитесь, что middleware для авторизации существует
+const { authenticateJWT } = require('../middleware/auth'); // Обновленный импорт
 
 // Настройка multer для загрузки файлов
 const storage = multer.diskStorage({

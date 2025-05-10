@@ -5,7 +5,7 @@ const ticketController = require('../controllers/ticketController');
 const messageController = require('../controllers/messageController');
 const multer = require('multer');
 const path = require('path');
-const auth = require('../middleware/auth');
+const { authenticateJWT } = require('../middleware/auth');
 
 // Настройка для загрузки файлов
 const storage = multer.diskStorage({
@@ -61,6 +61,7 @@ router.get('/', ticketController.getTickets);
 router.get('/:id', ticketController.getTicketById);
 router.put('/:id', ticketController.updateTicket);
 router.delete('/:id', ticketController.deleteTicket);
+router.patch('/:id/status', ticketController.updateTicketStatus);
 
 // Добавляем маршруты для работы с сообщениями заявок
 router.get('/:ticketId/messages', messageController.getTicketMessages);

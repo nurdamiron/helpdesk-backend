@@ -1,7 +1,8 @@
 // src/middleware/auth.js
-const pool = require('../config/database');
+const pool = require('../services/pool');
 
-const auth = async (req, res, next) => {
+// Middleware для проверки JWT аутентификации
+const authenticateJWT = async (req, res, next) => {
     console.log('Auth middleware triggered');
     
     try {
@@ -17,7 +18,7 @@ const auth = async (req, res, next) => {
         }
 
         // Получаем пользователя из базы данных
-        const [users] = await pool.execute(`
+        const [users] = await pool.query(`
             SELECT 
                 id,
                 email,
@@ -56,4 +57,18 @@ const auth = async (req, res, next) => {
     }
 };
 
-module.exports = auth;
+// Middleware для проверки роли администратора
+const isAdmin = (req, res, next) => {
+    if (!req.user || req.user.role !== 'admin') {
+        return res.status(403).json({
+            status: 'error',
+            error: 'Доступ запрещен. Требуются права администратора.'
+        });
+    }
+    next();
+};
+
+module.exports = {
+    authenticateJWT,
+    isAdmin
+};
