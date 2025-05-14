@@ -108,6 +108,15 @@ const authController = {
         });
       }
       
+      // Проверяем, что пользователь активен
+      if (user.is_active === 0) {
+        console.log('Login failed: User account is inactive', user.id);
+        return res.status(403).json({ 
+          status: 'error', 
+          error: 'Учетная запись неактивна. Обратитесь к администратору.' 
+        });
+      }
+      
       console.log('Login successful for user ID:', user.id);
 
       // Создаем JWT токен
@@ -155,7 +164,7 @@ const authController = {
       }
       
       const [users] = await pool.query(
-        'SELECT id, email, first_name, last_name, role FROM users WHERE id = ?', 
+        'SELECT id, email, first_name, last_name, role, is_active FROM users WHERE id = ?', 
         [userId]
       );
       
@@ -192,7 +201,7 @@ const authController = {
   getUsers: async (req, res) => {
     try {
       const [users] = await pool.query(
-        'SELECT id, email, first_name, last_name, role, created_at FROM users ORDER BY id DESC'
+        'SELECT id, email, first_name, last_name, role, created_at, is_active FROM users ORDER BY id DESC'
       );
       return res.json(users);
     } catch (error) {
@@ -206,7 +215,7 @@ const authController = {
     try {
       const { id } = req.params;
       const [rows] = await pool.query(
-        'SELECT id, email, first_name, last_name, role, created_at FROM users WHERE id = ?',
+        'SELECT id, email, first_name, last_name, role, created_at, is_active FROM users WHERE id = ?',
         [id]
       );
       
@@ -225,7 +234,7 @@ const authController = {
   updateUser: async (req, res) => {
     try {
       const { id } = req.params;
-      const { first_name, last_name, password, role } = req.body;
+      const { first_name, last_name, password, role, is_active } = req.body;
 
       const [ex] = await pool.query('SELECT id FROM users WHERE id=?', [id]);
       if (!ex.length) {
@@ -244,23 +253,37 @@ const authController = {
       const validRoles = ['admin', 'support', 'manager', 'user', 'moderator']; // Включаем все возможные роли
       const userRole = role && validRoles.includes(role) ? role : null;
 
+      // Преобразуем статус активности в булево значение
+      const activeStatus = is_active !== undefined ? (is_active ? 1 : 0) : null;
+
       // Обновляем остальные поля
       await pool.query(
         `UPDATE users SET
           first_name=COALESCE(?, first_name),
           last_name=COALESCE(?, last_name),
           role=COALESCE(?, role),
+          is_active=COALESCE(?, is_active),
           updated_at=CURRENT_TIMESTAMP
         WHERE id=?`,
         [
           first_name, 
           last_name, 
           userRole,
+          activeStatus,
           id
         ]
       );
 
-      return res.json({ message: 'Пользователь обновлён' });
+      // Получаем обновленные данные пользователя
+      const [updatedUser] = await pool.query(
+        'SELECT id, email, first_name, last_name, role, is_active FROM users WHERE id=?',
+        [id]
+      );
+
+      return res.json({ 
+        message: 'Пользователь обновлён',
+        user: updatedUser[0]
+      });
     } catch (error) {
       console.error('Error updateUser:', error);
       res.status(500).json({ error: 'Ошибка при обновлении' });

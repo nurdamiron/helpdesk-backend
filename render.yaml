@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: helpdesk-backend
+    env: node
+    buildCommand: npm install
+    startCommand: npm run start:delay
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 10000
+      - key: RENDER
+        value: true
+    plan: free

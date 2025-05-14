@@ -278,11 +278,18 @@ pool.testConnection().then(async isConnected => {
     }
   }
   
-  app.listen(PORT, () => {
-    console.log(`Сервер запущен на порту ${PORT}`);
-    console.log(`Окружение: ${process.env.NODE_ENV}`);
-    console.log(`Время: ${new Date().toISOString()}`);
-  });
+  // Не запускаем сервер здесь - это делается в server.js
+  // НЕ ЗАПУСКАЙТЕ app.listen здесь, это приводит к ошибке EADDRINUSE!
+  // Эта функция просто настраивает приложение Express, которое затем используется в server.js
+  
+  // Если файл запущен напрямую, а не через server.js, то запускаем сервер
+  if (require.main === module) {
+    app.listen(PORT, () => {
+      console.log(`Сервер запущен напрямую на порту ${PORT}`);
+      console.log(`Окружение: ${process.env.NODE_ENV}`);
+      console.log(`Время: ${new Date().toISOString()}`);
+    });
+  }
 });
 
 // Обработчики глобальных ошибок

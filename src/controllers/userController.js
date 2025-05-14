@@ -39,9 +39,32 @@ exports.createUser = async (req, res) => {
 
 exports.getUsers = async (req, res) => {
   try {
-    const [rows] = await pool.query(
-      'SELECT id, email, first_name, last_name, role, is_active, created_at FROM users ORDER BY id DESC'
-    );
+    // Проверяем, существуют ли колонки position и is_active в таблице
+    const [columns] = await pool.query(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_NAME = 'users' AND COLUMN_NAME IN ('position', 'is_active')
+    `);
+    
+    const hasPosition = columns.some(col => col.COLUMN_NAME === 'position');
+    const hasIsActive = columns.some(col => col.COLUMN_NAME === 'is_active');
+    
+    // Формируем запрос с учетом наличия или отсутствия колонок
+    let selectFields = [
+      'id', 'email', 'first_name', 'last_name', 'role', 'created_at'
+    ];
+    
+    if (hasPosition) {
+      selectFields.push('position');
+    }
+    
+    if (hasIsActive) {
+      selectFields.push('is_active');
+    }
+    
+    const selectQuery = `SELECT ${selectFields.join(', ')} FROM users ORDER BY id DESC`;
+    
+    const [rows] = await pool.query(selectQuery);
     return res.json(rows);
   } catch (error) {
     console.error('Error getUsers:', error);
@@ -52,10 +75,41 @@ exports.getUsers = async (req, res) => {
 exports.getUserById = async (req, res) => {
   try {
     const { id } = req.params;
-    const [rows] = await pool.query(
-      'SELECT id, email, first_name, last_name, role, phone, language, timezone, is_active, created_at FROM users WHERE id=?',
-      [id]
-    );
+    
+    // Проверяем, существуют ли колонки position, is_active, phone и phone_work в таблице
+    const [columns] = await pool.query(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_NAME = 'users' AND COLUMN_NAME IN ('position', 'is_active', 'phone', 'phone_work')
+    `);
+    
+    const hasPosition = columns.some(col => col.COLUMN_NAME === 'position');
+    const hasIsActive = columns.some(col => col.COLUMN_NAME === 'is_active');
+    const hasPhone = columns.some(col => col.COLUMN_NAME === 'phone');
+    const hasPhoneWork = columns.some(col => col.COLUMN_NAME === 'phone_work');
+    
+    // Формируем запрос с учетом наличия или отсутствия колонок
+    let selectFields = [
+      'id', 'email', 'first_name', 'last_name', 'role', 'language', 'timezone', 'created_at'
+    ];
+    
+    if (hasPosition) {
+      selectFields.push('position');
+    }
+    
+    if (hasPhone) {
+      selectFields.push('phone');
+    } else if (hasPhoneWork) {
+      selectFields.push('phone_work as phone');
+    }
+    
+    if (hasIsActive) {
+      selectFields.push('is_active');
+    }
+    
+    const selectQuery = `SELECT ${selectFields.join(', ')} FROM users WHERE id=?`;
+    
+    const [rows] = await pool.query(selectQuery, [id]);
     if (!rows.length) {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
@@ -69,7 +123,7 @@ exports.getUserById = async (req, res) => {
 exports.updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const { first_name, last_name, email, phone, role, is_active } = req.body;
+    const { first_name, last_name, email, phone, role, is_active, position } = req.body;
 
     const [ex] = await pool.query('SELECT id FROM users WHERE id=?', [id]);
     if (!ex.length) {
@@ -91,33 +145,91 @@ exports.updateUser = async (req, res) => {
     // Преобразуем статус активности в булево значение
     const activeStatus = is_active !== undefined ? (is_active ? 1 : 0) : null;
 
-    // Обновляем поля (убираем position, так как это поле отсутствует в БД)
-    await pool.query(
-      `UPDATE users SET
-        first_name=COALESCE(?, first_name),
-        last_name=COALESCE(?, last_name),
-        email=COALESCE(?, email),
-        phone=COALESCE(?, phone),
-        role=COALESCE(?, role),
-        is_active=COALESCE(?, is_active),
-        updated_at=CURRENT_TIMESTAMP
-      WHERE id=?`,
-      [
-        first_name, 
-        last_name,
-        email,
-        phone,
-        userRole,
-        activeStatus,
-        id
-      ]
-    );
+    // Проверяем, существуют ли колонки position, is_active, phone и phone_work в таблице
+    const [columns] = await pool.query(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_NAME = 'users' AND COLUMN_NAME IN ('position', 'is_active', 'phone', 'phone_work')
+    `);
+    
+    const hasPosition = columns.some(col => col.COLUMN_NAME === 'position');
+    const hasIsActive = columns.some(col => col.COLUMN_NAME === 'is_active');
+    const hasPhone = columns.some(col => col.COLUMN_NAME === 'phone');
+    const hasPhoneWork = columns.some(col => col.COLUMN_NAME === 'phone_work');
+    
+    // Формируем базовый запрос для обновления
+    let updateFields = [
+      'first_name=COALESCE(?, first_name)',
+      'last_name=COALESCE(?, last_name)',
+      'email=COALESCE(?, email)',
+      'role=COALESCE(?, role)',
+      'updated_at=CURRENT_TIMESTAMP'
+    ];
+    
+    // Параметры для базового запроса
+    let params = [
+      first_name, 
+      last_name,
+      email,
+      userRole
+    ];
+    
+    // Добавляем position, если такая колонка существует
+    if (hasPosition) {
+      updateFields.push('position=COALESCE(?, position)');
+      params.push(position);
+    }
+    
+    // Добавляем phone или phone_work, если существует
+    if (hasPhone && phone !== undefined) {
+      updateFields.push('phone=COALESCE(?, phone)');
+      params.push(phone);
+    } else if (hasPhoneWork && phone !== undefined) {
+      updateFields.push('phone_work=COALESCE(?, phone_work)');
+      params.push(phone);
+    }
+    
+    // Добавляем is_active, если такая колонка существует
+    if (hasIsActive) {
+      updateFields.push('is_active=COALESCE(?, is_active)');
+      params.push(activeStatus);
+    }
+    
+    // Добавляем id в параметры
+    params.push(id);
+    
+    // Формируем окончательный запрос
+    const query = `
+      UPDATE users SET
+      ${updateFields.join(', ')}
+      WHERE id=?
+    `;
+    
+    await pool.query(query, params);
 
     // Получаем обновленные данные пользователя
-    const [updatedUser] = await pool.query(
-      'SELECT id, email, first_name, last_name, role, phone, is_active FROM users WHERE id=?',
-      [id]
-    );
+    // Формируем запрос с учетом наличия или отсутствия колонок
+    let selectFields = [
+      'id', 'email', 'first_name', 'last_name', 'role'
+    ];
+    
+    if (hasPosition) {
+      selectFields.push('position');
+    }
+    
+    if (hasPhone) {
+      selectFields.push('phone');
+    } else if (hasPhoneWork) {
+      selectFields.push('phone_work as phone');
+    }
+    
+    if (hasIsActive) {
+      selectFields.push('is_active');
+    }
+    
+    const selectQuery = `SELECT ${selectFields.join(', ')} FROM users WHERE id=?`;
+    
+    const [updatedUser] = await pool.query(selectQuery, [id]);
 
     return res.json({ 
       message: 'Пользователь обновлён',
@@ -230,9 +342,24 @@ exports.login = async (req, res) => {
       return res.status(400).json({ error: 'Укажите email и пароль' });
     }
 
+    // Проверяем, существует ли колонка is_active
+    const [columns] = await pool.query(`
+      SELECT COLUMN_NAME 
+      FROM INFORMATION_SCHEMA.COLUMNS 
+      WHERE TABLE_NAME = 'users' AND COLUMN_NAME = 'is_active'
+    `);
+    
+    const hasIsActive = columns.length > 0;
+    
+    // Формируем запрос в зависимости от наличия колонки is_active
+    let selectFields = 'id, email, password, first_name, last_name, role, phone, language, timezone, settings';
+    if (hasIsActive) {
+      selectFields += ', is_active';
+    }
+    
     // Ищем пользователя
     const [rows] = await pool.query(
-      'SELECT id, email, password, first_name, last_name, role, phone, language, timezone, settings, is_active FROM users WHERE email=?',
+      `SELECT ${selectFields} FROM users WHERE email=?`,
       [email]
     );
     
@@ -247,8 +374,8 @@ exports.login = async (req, res) => {
       return res.status(401).json({ error: 'Неверные учётные данные' });
     }
     
-    // Проверяем, что пользователь активен
-    if (user.is_active === 0) {
+    // Проверяем, что пользователь активен, если такая колонка существует
+    if (hasIsActive && user.is_active === 0) {
       return res.status(403).json({ error: 'Учетная запись неактивна. Обратитесь к администратору.' });
     }
 
@@ -273,7 +400,7 @@ exports.login = async (req, res) => {
         phone: user.phone || '',
         language: user.language || 'kk',
         timezone: user.timezone || 'asia-almaty',
-        is_active: user.is_active === 1,
+        is_active: hasIsActive ? user.is_active === 1 : true, // По умолчанию считаем активным, если колонки нет
         notifications: settings.notifications || {},
         preferences: settings.preferences || {}
       }

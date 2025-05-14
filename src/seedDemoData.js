@@ -3,9 +3,9 @@ const pool = require('./config/database');
 
 // Демо пользователи
 const mockUsers = [
-    { id: 1, email: 'admin@example.com', first_name: 'Админ', last_name: 'Системы', role: 'admin' },
-    { id: 2, email: 'moderator@example.com', first_name: 'Модератор', last_name: 'Поддержки', role: 'moderator' },
-    { id: 3, email: 'user@example.com', first_name: 'Обычный', last_name: 'Пользователь', role: 'user' }
+    { id: 1, email: 'admin@example.com', first_name: 'Админ', last_name: 'Системы', role: 'admin', is_active: 1 },
+    { id: 2, email: 'moderator@example.com', first_name: 'Модератор', last_name: 'Поддержки', role: 'moderator', is_active: 1 },
+    { id: 3, email: 'user@example.com', first_name: 'Обычный', last_name: 'Пользователь', role: 'user', is_active: 1 }
 ];
 
 // Демо тикеты
@@ -134,5 +134,51 @@ async function addDemoTickets() {
     }
 }
 
-// Выполняем функцию добавления демо-данных
-addDemoTickets();
+// Функция для добавления демо-пользователей
+async function addDemoUsers() {
+    try {
+        console.log('Adding demo users...');
+        
+        // Проверяем, есть ли уже пользователи в базе
+        const [usersCount] = await pool.query('SELECT COUNT(*) as count FROM users');
+        
+        if (usersCount[0].count > 0) {
+            console.log(`Database already has ${usersCount[0].count} users. Checking if we need to update is_active...`);
+            
+            // Обновляем is_active для существующих пользователей
+            await pool.query('UPDATE users SET is_active = 1');
+            console.log('Updated all existing users to active status.');
+            
+            // Не добавляем новых пользователей
+            return;
+        }
+        
+        // Добавляем демо-пользователей
+        for (const user of mockUsers) {
+            await pool.query(`
+                INSERT INTO users 
+                (id, email, first_name, last_name, role, is_active, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
+            `, [
+                user.id,
+                user.email,
+                user.first_name,
+                user.last_name,
+                user.role,
+                user.is_active
+            ]);
+        }
+        
+        console.log('Demo users added successfully!');
+    } catch (error) {
+        console.error('Error adding demo users:', error);
+    }
+}
+
+// Выполняем функции добавления демо-данных
+async function seedAllDemoData() {
+    await addDemoUsers();
+    await addDemoTickets();
+}
+
+seedAllDemoData();

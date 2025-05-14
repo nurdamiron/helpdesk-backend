@@ -250,6 +250,14 @@ exports.addMessage = async (req, res) => {
     // Send WebSocket notification if available
     if (global.wsServer) {
       try {
+        // Map internal role to WebSocket expected sender type
+        let wsUserType = sender_type;
+        if (sender_type === 'admin' || sender_type === 'moderator') {
+          wsUserType = 'staff';
+        } else if (sender_type === 'user') {
+          wsUserType = 'requester';
+        }
+        
         // Notify the appropriate recipient
         if (sender_type === 'user') {
           // If message is from user, notify moderators and admins
@@ -259,25 +267,33 @@ exports.addMessage = async (req, res) => {
           });
         } else if (sender_type === 'moderator' || sender_type === 'admin') {
           // If message is from moderator or admin, notify the user
-          if (ticket.user_id) {
-            global.wsServer.sendToSpecificClient('user', ticket.user_id, {
+          if (ticket.requester_id) {
+            global.wsServer.sendToSpecificClient('requester', ticket.requester_id, {
               type: 'new_message',
               message: responseMessage
             });
           }
         }
         
-        console.log('WebSocket notification sent');
+        console.log(`WebSocket notification sent, sender type: ${wsUserType}`);
       } catch (wsError) {
         console.error('Error sending WebSocket notification:', wsError);
       }
     }
     
     // Send email notification if requested and recipient available
-    if (notify_email && ((sender_type === 'staff' && ticket.requester_email) || 
-                         (sender_type === 'requester' && ticket.assigned_to_email))) {
-      const recipientEmail = sender_type === 'staff' ? ticket.requester_email : ticket.assigned_to_email;
-      const recipientName = sender_type === 'staff' ? ticket.requester_name : ticket.assigned_to_name;
+    // Map role types to email notification types if needed
+    let emailSenderType = sender_type;
+    if (sender_type === 'admin' || sender_type === 'moderator') {
+      emailSenderType = 'staff';
+    } else if (sender_type === 'user') {
+      emailSenderType = 'requester';
+    }
+    
+    if (notify_email && ((emailSenderType === 'staff' && ticket.requester_email) || 
+                         (emailSenderType === 'requester' && ticket.assigned_to_email))) {
+      const recipientEmail = emailSenderType === 'staff' ? ticket.requester_email : ticket.assigned_to_email;
+      const recipientName = emailSenderType === 'staff' ? ticket.requester_name : ticket.assigned_to_name;
       
       try {
         await sendMessageNotification(ticket, responseMessage, {

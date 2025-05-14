@@ -80,14 +80,33 @@ async function startServer() {
       process.exit(1);
     }
     
-    // Проверяем доступность порта
-    // Порттың қолжетімділігін тексереміз
-    const isPortFree = await isPortAvailable(PORT);
+    // Проверяем доступность порта - делаем несколько попыток (до 3-х)
+    // Порттың қолжетімділігін тексереміз - бірнеше әрекет жасаймыз (3-ке дейін)
+    let isPortFree = false;
+    let retries = 0;
+    const maxRetries = 3;
+    
+    while (!isPortFree && retries < maxRetries) {
+      isPortFree = await isPortAvailable(PORT);
+      if (!isPortFree) {
+        console.log(`Попытка ${retries + 1}/${maxRetries}: Порт ${PORT} занят, повторная проверка через 1 секунду...`);
+        await new Promise(resolve => setTimeout(resolve, 1000)); // Подождать 1 секунду
+        retries++;
+      }
+    }
+    
     const finalPort = isPortFree ? PORT : await findAvailablePort(PORT);
     
     if (finalPort !== PORT) {
       console.log(`Порт ${PORT} занят, используем порт ${finalPort}`);
       console.log(`Порт ${PORT} бос емес, ${finalPort} портын қолданамыз`);
+      
+      // Особенности среды Render и других облачных платформ - посоветуем пользователю
+      if (process.env.RENDER || process.env.NODE_ENV === 'production') {
+        console.log('Предупреждение! Вы запускаете сервер в производственной среде, но нужный порт занят.');
+        console.log('В средах типа Render это может произойти при перезапуске сервиса.');
+        console.log('Рекомендуется добавить время задержки между остановкой и запуском сервиса.');
+      }
     }
     
     // Создаем HTTP сервер
@@ -303,13 +322,43 @@ function setupProcessHandlers(server) {
   
   // Обработчик необработанных исключений
   // Өңделмеген қателерді өңдеу
-  process.on('uncaughtException', (error) => {
+  process.on('uncaughtException', async (error) => {
     console.error('Uncaught Exception:', error);
     console.error('Өңделмеген қате:', error);
     
-    // Не закрываем процесс, если ошибка связана с занятым портом
-    // Егер қате бос емес портқа байланысты болса, процесті жаппаймыз
-    if (error.code !== 'EADDRINUSE') {
+    // Специальная обработка для ошибки EADDRINUSE (занятый порт)
+    if (error.code === 'EADDRINUSE') {
+      console.log(`Ошибка: порт ${error.port} уже используется другим процессом.`);
+      console.log('Пробуем перезапустить сервер на другом порту...');
+      
+      try {
+        // Попытка найти свободный порт и перезапустить сервер
+        const newPort = await findAvailablePort(error.port + 1);
+        console.log(`Найден свободный порт: ${newPort}. Перезапуск сервера...`);
+        
+        // Если это среда Render или другая облачная платформа, выдаем рекомендацию
+        if (process.env.RENDER || process.env.NODE_ENV === 'production') {
+          console.log('ВАЖНО: В среде облачного хостинга рекомендуется:');
+          console.log('1. Настроить время ожидания между остановкой и запуском сервера');
+          console.log('2. Убедиться, что старый процесс полностью завершен перед запуском нового');
+          console.log('3. Проверить настройки порта в панели управления платформой');
+        }
+        
+        // В производственной среде завершаем процесс с ошибкой для перезапуска
+        if (process.env.NODE_ENV === 'production') {
+          console.log('В производственной среде завершаем процесс для корректного перезапуска...');
+          setTimeout(() => {
+            process.exit(1);
+          }, 2000);
+        }
+      } catch (e) {
+        console.error('Ошибка при попытке перезапуска на другом порту:', e);
+        setTimeout(() => {
+          process.exit(1);
+        }, 1000);
+      }
+    } else {
+      // Для других ошибок - завершаем процесс после логирования
       setTimeout(() => {
         process.exit(1);
       }, 1000);
