@@ -1,37 +1,92 @@
-# Директория с зависимостями
+# Dependencies
 node_modules/
+/.pnp
+.pnp.js
 
-# Файлы логов
+# Log files
 logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 lerna-debug.log*
+pnpm-debug.log*
 
-# Директория с кешем npm
+# Cache directories
 .npm
-
-# Директория с кешем eslint
 .eslintcache
+.node_repl_history
+.yarn-integrity
+.parcel-cache
 
-# Директория с собранным проектом
+# Build directories
 /dist
 /build
+/out
+/.next/
+/.nuxt/
+/.output/
 
-# Локальные файлы настроек
+# Environment files
 .env
 .env.local
+.env.development
+.env.test
+.env.production
 .env.development.local
 .env.test.local
 .env.production.local
+*.env
 
-# Файлы редакторов
+# Editor directories and files
 .idea/
 .vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
 *.swp
 *.swo
+*~
 
-# Файлы операционной системы
+# Operating system files
 .DS_Store
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Project specific
+# Uploaded files directory - keep the directory but ignore contents
+/uploads/*
+!/uploads/.gitkeep
+
+# Coverage directory used by tools like istanbul
+/coverage
+/.nyc_output
+
+# Test directories and files
+/cypress/videos/
+/cypress/screenshots/
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+tmp/
+temp/
+
+# Local configuration
+config.local.js
+local.settings.json
+
+# Debug files
+.debug
+debug.log
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
