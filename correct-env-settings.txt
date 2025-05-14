@@ -1,0 +1,25 @@
+# Скопируйте эти настройки в файл .env
+
+# Database Configuration
+PORT=5002
+DB_HOST=biz360.czwiyugwum02.eu-north-1.rds.amazonaws.com
+DB_USER=root
+DB_PASSWORD=nurda0101
+DB_NAME=helpdesk
+
+# SMTP Configuration
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_USER=nurdamiron@gmail.com
+SMTP_PASSWORD=hvhg ekcb dhnm fykz
+EMAIL_FROM=no-reply@helpdesk.kz
+
+# Email Configuration
+EMAIL_USER=nurdamiron@gmail.com
+EMAIL_PASSWORD=hvhg ekcb dhnm fykz
+
+# Frontend URL - will be used for generating links in emails
+FRONTEND_URL=http://localhost:3000
+# For production, use:
+# FRONTEND_URL=https://helpdesk-client-iota.vercel.app 

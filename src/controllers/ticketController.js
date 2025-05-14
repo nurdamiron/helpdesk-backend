@@ -69,7 +69,9 @@ exports.createTicket = async (req, res) => {
       type = 'request', 
       priority = 'medium', 
       category = 'general',
-      metadata = {}
+      metadata = {},
+      requester_metadata = {},
+      user_id = null // Добавляем возможность передать ID пользователя
     } = req.body;
 
     if (!subject || !description) {
@@ -85,17 +87,35 @@ exports.createTicket = async (req, res) => {
       type: type // Добавляем тип в metadata
     });
     
-    // Получаем данные сотрудника из metadata, если есть
+    // Получаем данные заявителя, если они есть
     let requesterMetadataJSON = '{}';
-    if (metadata.employee) {
+    if (requester_metadata && Object.keys(requester_metadata).length > 0) {
+      // Если передана информация о заявителе, используем её
+      requesterMetadataJSON = typeof requester_metadata === 'string' 
+        ? requester_metadata 
+        : JSON.stringify(requester_metadata);
+    } else if (metadata.employee) {
+      // Для обратной совместимости
       requesterMetadataJSON = JSON.stringify(metadata.employee);
     }
 
-    // Вставка заявки
+    // Проверяем переданный user_id, если он есть
+    let userId = null;
+    if (user_id) {
+      // Проверяем существует ли пользователь с таким ID
+      const [userExists] = await pool.query('SELECT id FROM users WHERE id = ?', [user_id]);
+      if (userExists.length > 0) {
+        userId = user_id;
+      }
+    }
+    
+    // В этой версии не используем employee_id - сотрудники хранятся в metadata
+
+    // Вставка заявки с user_id
     const [result] = await pool.query(
-      `INSERT INTO tickets (subject, description, priority, category, status, metadata, requester_metadata) 
-       VALUES (?, ?, ?, ?, 'new', ?, ?)`,
-      [subject, description, priority, category, metadataJSON, requesterMetadataJSON]
+      `INSERT INTO tickets (subject, description, priority, category, status, metadata, requester_metadata, user_id) 
+       VALUES (?, ?, ?, ?, 'new', ?, ?, ?)`,
+      [subject, description, priority, category, metadataJSON, requesterMetadataJSON, userId]
     );
 
     // Получаем данные заявки для ответа
@@ -128,18 +148,44 @@ exports.createTicket = async (req, res) => {
       }
     }
 
+    // Если заявка связана с пользователем, получаем его данные
+    if (userId) {
+      const [userRows] = await pool.query(
+        'SELECT id, email, first_name, last_name, role FROM users WHERE id = ?', 
+        [userId]
+      );
+      
+      if (userRows.length > 0) {
+        // Если у пользователя есть email и он не был получен из metadata
+        // используем email из данных пользователя
+        if (userRows[0].email && !userData.email) {
+          userData.email = userRows[0].email;
+        }
+      }
+    }
+
     // Отправляем письмо-подтверждение, если есть email
     let emailSent = false;
     if (userData.email) {
       try {
+        // Добавляем дополнительное логирование для отладки
+        console.log('Sending notification to email:', userData.email);
+        console.log('Ticket data for email:', JSON.stringify(ticket, null, 2));
+        console.log('User data for email:', JSON.stringify(userData, null, 2));
+        
         // Используем новую функцию отправки уведомлений
         await sendTicketCreationNotification(userData.email, ticket);
         console.log(`Өтініш туралы хабарлама ${userData.email} адресіне жіберілді`);
         emailSent = true;
       } catch (emailError) {
         console.error('Email жіберу кезінде қате:', emailError);
+        console.error('Error details:', emailError.message, emailError.stack);
         // Продолжаем выполнение, даже если не удалось отправить письмо
       }
+    } else {
+      console.log('No email address found for notification.');
+      console.log('Ticket requester_metadata:', ticket.requester_metadata);
+      console.log('Extracted user data:', userData);
     }
 
     // Добавляем статус отправки email в заголовки ответа
@@ -170,109 +216,112 @@ exports.getTickets = async (req, res) => {
       priority,
       category,
       search,
-      page = 1,
+      user_id,
       limit = 10,
+      offset = 0,
       sort = 'created_at',
       order = 'DESC'
     } = req.query;
 
-    const allowedSortFields = ['id', 'subject', 'created_at', 'updated_at', 'status', 'priority', 'category'];
-    const sortField = allowedSortFields.includes(sort) ? sort : 'created_at';
-    const sortOrder = order.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
-    const offset = (page - 1) * limit;
-
-    // Изменяем запрос, чтобы не требовалась таблица employees
-    let query = `
-      SELECT
-        t.*,
-        COALESCE(u.first_name, '') as assigned_first_name,
-        COALESCE(u.last_name, '') as assigned_last_name
-      FROM tickets t
-      LEFT JOIN users u ON t.assigned_to = u.id
-      WHERE 1=1
-    `;
-    const whereConditions = [];
+    // Базовый запрос
+    let query = 'SELECT t.*, u.email as user_email, u.first_name, u.last_name FROM tickets t LEFT JOIN users u ON t.user_id = u.id WHERE 1=1';
     const params = [];
 
+    console.log('Current user:', req.user);
+    
+    // Если пользователь не админ и не модератор, показываем только его заявки
+    if (req.user && (req.user.role === 'user' || req.user.role === undefined)) {
+      console.log('Filtering tickets for user ID:', req.user.id);
+      query += ' AND t.user_id = ?';
+      params.push(req.user.id);
+    } else if (user_id) {
+      // Если передан user_id и пользователь имеет права (админ или модератор), фильтруем по нему
+      console.log('Filtering tickets by provided user_id:', user_id);
+      query += ' AND t.user_id = ?';
+      params.push(user_id);
+    } else {
+      console.log('Showing all tickets (admin/moderator view)');
+    }
+
+    // Добавляем остальные фильтры
     if (status) {
-      whereConditions.push('t.status = ?');
+      query += ' AND t.status = ?';
       params.push(status);
     }
-    // Для фильтрации по типу нужно использовать JSON_EXTRACT, если тип хранится в metadata
     if (type) {
-      whereConditions.push("JSON_EXTRACT(t.metadata, '$.type') = ?");
+      query += ' AND t.type = ?';
       params.push(type);
     }
     if (priority) {
-      whereConditions.push('t.priority = ?');
+      query += ' AND t.priority = ?';
       params.push(priority);
     }
     if (category) {
-      whereConditions.push('t.category = ?');
+      query += ' AND t.category = ?';
       params.push(category);
     }
     if (search) {
-      whereConditions.push('(t.subject LIKE ? OR t.description LIKE ?)');
-      const s = `%${search}%`;
-      params.push(s, s);
+      query += ' AND (t.subject LIKE ? OR t.description LIKE ?)';
+      params.push(`%${search}%`, `%${search}%`);
     }
 
-    if (whereConditions.length) {
-      query += ' AND ' + whereConditions.join(' AND ');
+    // Добавляем сортировку и пагинацию
+    query += ` ORDER BY t.${sort} ${order} LIMIT ? OFFSET ?`;
+    params.push(parseInt(limit), parseInt(offset));
+
+    // Выполняем запрос
+    const [tickets] = await pool.query(query, params);
+
+    // Получаем общее количество заявок для пагинации
+    let countQuery = 'SELECT COUNT(*) as total FROM tickets t WHERE 1=1';
+    const countParams = [];
+
+    if (req.user && (req.user.role === 'user' || req.user.role === undefined)) {
+      countQuery += ' AND t.user_id = ?';
+      countParams.push(req.user.id);
+    } else if (user_id) {
+      countQuery += ' AND t.user_id = ?';
+      countParams.push(user_id);
     }
 
-    // Считаем общее кол-во без использования таблицы employees
-    const countQuery = `
-      SELECT COUNT(*) as total
-      FROM tickets t
-      ${whereConditions.length ? ' WHERE ' + whereConditions.join(' AND ') : ''}
-    `;
+    // Добавляем те же фильтры для подсчета
+    if (status) {
+      countQuery += ' AND t.status = ?';
+      countParams.push(status);
+    }
+    if (type) {
+      countQuery += ' AND t.type = ?';
+      countParams.push(type);
+    }
+    if (priority) {
+      countQuery += ' AND t.priority = ?';
+      countParams.push(priority);
+    }
+    if (category) {
+      countQuery += ' AND t.category = ?';
+      countParams.push(category);
+    }
+    if (search) {
+      countQuery += ' AND (t.subject LIKE ? OR t.description LIKE ?)';
+      countParams.push(`%${search}%`, `%${search}%`);
+    }
 
-    const [totalRows] = await pool.query(countQuery, params);
-    const total = totalRows[0].total;
-
-    query += ` ORDER BY t.${sortField} ${sortOrder} LIMIT ? OFFSET ?`;
-    params.push(parseInt(limit), offset);
-
-    const [rows] = await pool.query(query, params);
-
-    // Преобразуем результаты для включения локализованных текстов
-    const result = rows.map(ticket => {
-      let ticketType = 'request'; // Тип по умолчанию
-      
-      // Извлекаем тип из metadata, если он там есть
-      if (ticket.metadata) {
-        try {
-          const metadata = JSON.parse(ticket.metadata);
-          if (metadata.type) {
-            ticketType = metadata.type;
-          }
-        } catch (e) {
-          console.error('Ошибка при парсинге metadata:', e);
-        }
-      }
-      
-      return {
-        ...ticket,
-        type: ticketType,
-        status_text: STATUS_MAP[ticket.status] || ticket.status,
-        priority_text: PRIORITY_MAP[ticket.priority] || ticket.priority,
-        category_text: CATEGORY_MAP[ticket.category] || ticket.category,
-        type_text: TYPE_MAP[ticketType] || ticketType,
-        property_type_text: PROPERTY_TYPE_MAP[ticket.property_type] || ticket.property_type,
-      };
-    });
+    const [totalCount] = await pool.query(countQuery, countParams);
 
     return res.json({
-      total,
-      page: parseInt(page),
-      limit: parseInt(limit),
-      tickets: result
+      status: 'success',
+      data: tickets,
+      pagination: {
+        total: totalCount[0].total,
+        limit: parseInt(limit),
+        offset: parseInt(offset)
+      }
     });
   } catch (error) {
-    console.error('Ошибка получения списка заявок:', error);
-    return res.status(500).json({ 
-      error: 'Ошибка при получении списка заявок',
+    console.error('Ошибка getTickets:', error);
+    return res.status(500).json({
+      status: 'error',
+      error: 'Өтініштер тізімін алу кезінде қате пайда болды', // Ошибка при получении списка заявок
       details: error.message
     });
   }
@@ -283,11 +332,21 @@ exports.getTicketById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Получаем данные заявки без JOIN с таблицей employees
-    const [tickets] = await pool.query(
-      `SELECT * FROM tickets WHERE id = ?`,
-      [id]
-    );
+    // Проверка, есть ли у пользователя доступ к этой заявке
+    const isModerator = req.user && (req.user.role === 'moderator' || req.user.role === 'admin');
+    const userId = req.user ? req.user.id : null;
+    
+    // Запрос для получения заявки
+    // Если пользователь модератор или админ, он может видеть все заявки
+    // Если обычный пользователь, то только свои заявки
+    const query = isModerator 
+      ? `SELECT * FROM tickets WHERE id = ?` 
+      : `SELECT * FROM tickets WHERE id = ? AND (user_id = ? OR requester_id = ?)`;
+    
+    const params = isModerator ? [id] : [id, userId, userId];
+    
+    // Получаем данные заявки
+    const [tickets] = await pool.query(query, params);
 
     if (tickets.length === 0) {
       return res.status(404).json({ 
@@ -302,12 +361,20 @@ exports.getTicketById = async (req, res) => {
     // Если есть metadata, парсим его для получения типа
     if (ticket.metadata) {
       try {
-        const metadata = JSON.parse(ticket.metadata);
+        let metadata = ticket.metadata;
+        // Если metadata - строка, пытаемся распарсить как JSON
+        if (typeof metadata === 'string') {
+          metadata = JSON.parse(metadata);
+        } else if (metadata.toString() === '[object Object]') {
+          // Если объект уже преобразован, используем его напрямую
+          metadata = ticket.metadata;
+        }
+        
         if (metadata.type) {
           ticketType = metadata.type;
         }
       } catch (e) {
-        console.error('Ошибка парсинга metadata:', e);
+        console.error('Ошибка при парсинге metadata:', e);
       }
     }
     
@@ -337,16 +404,30 @@ exports.getTicketById = async (req, res) => {
       ticket.assigned_user = null;
     }
 
-    // Попробуем получить сообщения заявки
+    // Попробуем получить сообщения заявки вместе с информацией об отправителях
     try {
-      const [messages] = await pool.query(
-        `SELECT * FROM ticket_messages WHERE ticket_id = ? ORDER BY created_at ASC`,
-        [id]
-      );
-      ticket.messages = messages;
+      // Импортируем сервис для сообщений
+      const messageService = require('../services/messageService');
+      // Получаем сообщения с дополнительной информацией
+      const messages = await messageService.getTicketMessagesWithSenders(id);
+      
+      // Преобразуем сообщения в нужный формат
+      ticket.messages = messages.map(message => {
+        return {
+          ...message,
+          sender: {
+            id: message.sender_id,
+            name: message.sender_name,
+            email: message.sender_email,
+            type: message.sender_type
+          }
+        };
+      });
+      
+      console.log(`Получено ${ticket.messages.length} сообщений для заявки #${id} с информацией об отправителях`);
     } catch (error) {
       // Если таблицы нет или другая ошибка, просто вернем пустой массив
-      console.log('Не удалось получить сообщения:', error.message);
+      console.error('Не удалось получить сообщения:', error.message);
       ticket.messages = [];
     }
 
@@ -485,12 +566,20 @@ exports.updateTicket = async (req, res) => {
     let ticketType = 'request'; // Тип по умолчанию
     if (ticket.metadata) {
       try {
-        const metadata = JSON.parse(ticket.metadata);
+        let metadata = ticket.metadata;
+        // Если metadata - строка, пытаемся распарсить как JSON
+        if (typeof metadata === 'string') {
+          metadata = JSON.parse(metadata);
+        } else if (metadata.toString() === '[object Object]') {
+          // Если объект уже преобразован, используем его напрямую
+          metadata = ticket.metadata;
+        }
+        
         if (metadata.type) {
           ticketType = metadata.type;
         }
       } catch (e) {
-        console.error('Ошибка парсинга metadata:', e);
+        console.error('Ошибка при парсинге metadata:', e);
       }
     }
     ticket.type = ticketType;
@@ -608,6 +697,68 @@ exports.uploadAttachment = async (req, res) => {
   } catch (error) {
     console.error('Ошибка uploadAttachment:', error);
     return res.status(500).json({ error: 'Ошибка загрузки вложения' });
+  }
+};
+
+/**
+ * Получение аналитики по заявкам
+ * @param {Object} req - HTTP запрос
+ * @param {Object} res - HTTP ответ
+ * @returns {Object} Статистика по заявкам
+ */
+exports.getTicketsAnalytics = async (req, res) => {
+  try {
+    // Проверяем роль пользователя - только модераторы и админы имеют доступ
+    if (!req.user || !['admin', 'moderator', 'manager', 'support'].includes(req.user.role)) {
+      return res.status(403).json({
+        status: 'error',
+        error: 'У вас нет доступа к этой функции'
+      });
+    }
+
+    // Получаем общее количество заявок
+    const [totalResult] = await pool.query('SELECT COUNT(*) as total FROM tickets');
+    const totalTickets = totalResult[0].total;
+
+    // Получаем количество заявок по статусам
+    const [statusResult] = await pool.query(`
+      SELECT status, COUNT(*) as count 
+      FROM tickets 
+      GROUP BY status
+    `);
+
+    // Преобразуем результат в объект
+    const byStatus = {};
+    statusResult.forEach(row => {
+      byStatus[row.status] = row.count;
+    });
+
+    // Получаем количество заявок, назначенных текущему пользователю
+    const [assignedResult] = await pool.query(
+      'SELECT COUNT(*) as count FROM tickets WHERE assigned_to = ?',
+      [req.user.id]
+    );
+    const assignedToCurrentUser = assignedResult[0].count;
+
+    // Получаем среднее время ответа (разница между временем создания и первым ответом)
+    // Это сложный запрос, поэтому сделаем простую заглушку
+    const averageResponseTime = 24; // 24 часа в среднем
+
+    // Отправляем результат
+    return res.json({
+      status: 'success',
+      totalTickets,
+      byStatus,
+      assignedToCurrentUser,
+      averageResponseTime
+    });
+  } catch (error) {
+    console.error('Ошибка getTicketsAnalytics:', error);
+    return res.status(500).json({
+      status: 'error',
+      error: 'Ошибка при получении аналитики по заявкам',
+      details: error.message
+    });
   }
 };
 

@@ -119,10 +119,25 @@ exports.addMessage = async (req, res) => {
       content = '';
     }
     
-    // Determine sender type (staff or requester)
+    // Determine sender type based on user role
     // If not explicitly provided, use information from the authentication
     if (!sender_type) {
-      sender_type = req.user?.role === 'client' ? 'requester' : 'staff';
+      if (req.user) {
+        switch(req.user.role) {
+          case 'admin':
+            sender_type = 'admin';
+            break;
+          case 'moderator':
+            sender_type = 'moderator';
+            break;
+          case 'user':
+          default:
+            sender_type = 'user';
+            break;
+        }
+      } else {
+        sender_type = 'user'; // Default if no auth info
+      }
     }
     
     // Use auth user ID or default if not available
@@ -191,18 +206,18 @@ exports.addMessage = async (req, res) => {
       SELECT 
         m.*,
         CASE 
-          WHEN m.sender_type='requester' THEN r.full_name
-          WHEN m.sender_type='staff' THEN u.first_name
+          WHEN m.sender_type='user' THEN CONCAT(u.first_name, ' ', u.last_name)
+          WHEN m.sender_type='moderator' THEN CONCAT(u.first_name, ' ', u.last_name)
+          WHEN m.sender_type='admin' THEN CONCAT(u.first_name, ' ', u.last_name)
+          WHEN m.sender_type='system' THEN 'System'
           ELSE 'Unknown'
         END as sender_name,
         CASE
-          WHEN m.sender_type='requester' THEN r.email
-          WHEN m.sender_type='staff' THEN u.email
+          WHEN m.sender_type IN ('user', 'moderator', 'admin') THEN u.email
           ELSE NULL
         END as sender_email
       FROM ticket_messages m
-      LEFT JOIN requesters r ON (m.sender_type='requester' AND m.sender_id = r.id)
-      LEFT JOIN users u ON (m.sender_type='staff' AND m.sender_id = u.id)
+      LEFT JOIN users u ON (m.sender_type IN ('user', 'moderator', 'admin') AND m.sender_id = u.id)
       WHERE m.id = ?
     `, [messageId]);
     
@@ -224,7 +239,9 @@ exports.addMessage = async (req, res) => {
       sender: {
         id: message.sender_id,
         type: message.sender_type,
-        name: message.sender_name || (message.sender_type === 'requester' ? 'Клиент' : 'Администратор'),
+        name: message.sender_name || (message.sender_type === 'user' ? 'Пользователь' : 
+                                  message.sender_type === 'moderator' ? 'Модератор' : 
+                                  message.sender_type === 'admin' ? 'Администратор' : 'Система'),
         email: message.sender_email
       },
       status: 'sent'
@@ -234,18 +251,20 @@ exports.addMessage = async (req, res) => {
     if (global.wsServer) {
       try {
         // Notify the appropriate recipient
-        if (sender_type === 'requester') {
-          // If message is from requester, notify staff
-          global.wsServer.broadcastToType('staff', {
+        if (sender_type === 'user') {
+          // If message is from user, notify moderators and admins
+          global.wsServer.broadcastToType(['moderator', 'admin'], {
             type: 'new_message',
             message: responseMessage
           });
-        } else if (ticket.requester_id) {
-          // If message is from staff, notify requester
-          global.wsServer.sendToSpecificClient('requester', ticket.requester_id, {
-            type: 'new_message',
-            message: responseMessage
-          });
+        } else if (sender_type === 'moderator' || sender_type === 'admin') {
+          // If message is from moderator or admin, notify the user
+          if (ticket.user_id) {
+            global.wsServer.sendToSpecificClient('user', ticket.user_id, {
+              type: 'new_message',
+              message: responseMessage
+            });
+          }
         }
         
         console.log('WebSocket notification sent');

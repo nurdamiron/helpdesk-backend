@@ -12,7 +12,24 @@ module.exports = async (req, res) => {
   try {
     const { ticketId } = req.params;
     const userId = req.user?.id || 1;
-    const userType = req.user?.role === 'client' ? 'requester' : 'staff';
+    // Определяем тип пользователя в соответствии с новой моделью ролей
+    let userType;
+    if (req.user) {
+      switch(req.user.role) {
+        case 'admin':
+          userType = 'admin';
+          break;
+        case 'moderator':
+          userType = 'moderator';
+          break;
+        case 'user':
+        default:
+          userType = 'user';
+          break;
+      }
+    } else {
+      userType = 'user'; // По умолчанию
+    }
     
     console.log(`Запрос на отметку сообщений как прочитанные для заявки #${ticketId}`);
     console.log(`#${ticketId} өтінімі үшін хабарламаларды оқылды деп белгілеу сұрауы`);

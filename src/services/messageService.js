@@ -13,18 +13,18 @@ exports.getTicketMessagesWithSenders = async (ticketId) => {
     SELECT 
       tm.*,
       CASE 
-        WHEN tm.sender_type='requester' THEN r.full_name
-        WHEN tm.sender_type='staff' THEN u.first_name
+        WHEN tm.sender_type='user' THEN CONCAT(u.first_name, ' ', u.last_name)
+        WHEN tm.sender_type='moderator' THEN CONCAT(u.first_name, ' ', u.last_name)
+        WHEN tm.sender_type='admin' THEN CONCAT(u.first_name, ' ', u.last_name)
+        WHEN tm.sender_type='system' THEN 'System'
         ELSE 'Unknown'
       END as sender_name,
       CASE
-        WHEN tm.sender_type='requester' THEN r.email
-        WHEN tm.sender_type='staff' THEN u.email
+        WHEN tm.sender_type IN ('user', 'moderator', 'admin') THEN u.email
         ELSE NULL
       END as sender_email
     FROM ticket_messages tm
-    LEFT JOIN requesters r ON (tm.sender_type='requester' AND tm.sender_id = r.id)
-    LEFT JOIN users u ON (tm.sender_type='staff' AND tm.sender_id = u.id)
+    LEFT JOIN users u ON (tm.sender_type IN ('user', 'moderator', 'admin') AND tm.sender_id = u.id)
     WHERE tm.ticket_id = ?
     ORDER BY tm.created_at ASC
   `, [ticketId]);
@@ -53,7 +53,7 @@ exports.getMessageAttachments = async (ticketId) => {
  * Жаңа хабарлама жасайды және оны тіркемелермен байланыстырады
  * 
  * @param {number|string} ticketId - ID заявки
- * @param {string} senderType - Тип отправителя (requester, staff)
+ * @param {string} senderType - Тип отправителя (user, moderator, admin, system)
  * @param {number|string} senderId - ID отправителя
  * @param {string} content - Содержимое сообщения
  * @param {Array} attachmentIds - Список ID вложений для привязки
@@ -98,18 +98,18 @@ exports.createMessageWithAttachments = async (ticketId, senderType, senderId, co
     SELECT 
       m.*,
       CASE 
-        WHEN m.sender_type='requester' THEN r.full_name
-        WHEN m.sender_type='staff' THEN u.first_name
+        WHEN m.sender_type='user' THEN CONCAT(u.first_name, ' ', u.last_name)
+        WHEN m.sender_type='moderator' THEN CONCAT(u.first_name, ' ', u.last_name)
+        WHEN m.sender_type='admin' THEN CONCAT(u.first_name, ' ', u.last_name)
+        WHEN m.sender_type='system' THEN 'System'
         ELSE 'Unknown'
       END as sender_name,
       CASE
-        WHEN m.sender_type='requester' THEN r.email
-        WHEN m.sender_type='staff' THEN u.email
+        WHEN m.sender_type IN ('user', 'moderator', 'admin') THEN u.email
         ELSE NULL
       END as sender_email
     FROM ticket_messages m
-    LEFT JOIN requesters r ON (m.sender_type='requester' AND m.sender_id = r.id)
-    LEFT JOIN users u ON (m.sender_type='staff' AND m.sender_id = u.id)
+    LEFT JOIN users u ON (m.sender_type IN ('user', 'moderator', 'admin') AND m.sender_id = u.id)
     WHERE m.id = ?
   `, [messageId]);
   
@@ -170,34 +170,79 @@ exports.updateTicketStatus = async (ticketId) => {
  * 
  * @param {number|string} ticketId - ID заявки
  * @param {number|string} userId - ID пользователя
- * @param {string} userType - Тип пользователя (requester, staff)
+ * @param {string} userType - Тип пользователя (user, moderator, admin)
  */
 exports.markMessagesAsRead = async (ticketId, userId, userType) => {
   // Определяем, какие сообщения нужно отметить
   // Қандай хабарламаларды белгілеу керектігін анықтаймыз
-  const senderType = userType === 'requester' ? 'staff' : 'requester';
+  let senderType;
+  
+  if (userType === 'user') {
+    // Если пользователь обычный, отмечаем как прочитанные сообщения от модераторов и админов
+    senderType = ['moderator', 'admin'];
+  } else if (userType === 'moderator' || userType === 'admin') {
+    // Если модератор или админ, отмечаем как прочитанные сообщения от пользователей
+    senderType = ['user'];
+  } else {
+    // По умолчанию для совместимости со старым кодом
+    senderType = userType === 'requester' ? 'staff' : 'requester';
+  }
   
   // Находим сообщения, которые нужно отметить
   // Белгілеу керек хабарламаларды табамыз
-  const [messagesToMark] = await pool.query(`
-    SELECT * FROM ticket_messages
-    WHERE ticket_id = ? 
-    AND sender_type = ?
-    AND (read_at IS NULL OR status != 'read')
-  `, [ticketId, senderType]);
+  let messagesToMark;
+  
+  if (Array.isArray(senderType)) {
+    // Если у нас массив типов отправителей
+    const placeholders = senderType.map(() => '?').join(',');
+    const query = `
+      SELECT * FROM ticket_messages
+      WHERE ticket_id = ? 
+      AND sender_type IN (${placeholders})
+      AND (read_at IS NULL OR status != 'read')
+    `;
+    
+    const [result] = await pool.query(query, [ticketId, ...senderType]);
+    messagesToMark = result;
+  } else {
+    // Если у нас один тип отправителя
+    const [result] = await pool.query(`
+      SELECT * FROM ticket_messages
+      WHERE ticket_id = ? 
+      AND sender_type = ?
+      AND (read_at IS NULL OR status != 'read')
+    `, [ticketId, senderType]);
+    messagesToMark = result;
+  }
   
   if (messagesToMark.length === 0) return;
   
   // Обновляем статус сообщений
   // Хабарламалар күйін жаңартамыз
-  await pool.query(`
-    UPDATE ticket_messages
-    SET status = 'read', read_at = CURRENT_TIMESTAMP, 
-        delivered_at = COALESCE(delivered_at, CURRENT_TIMESTAMP)
-    WHERE ticket_id = ? 
-    AND sender_type = ?
-    AND read_at IS NULL
-  `, [ticketId, senderType]);
+  if (Array.isArray(senderType)) {
+    // Если у нас массив типов отправителей
+    const placeholders = senderType.map(() => '?').join(',');
+    const query = `
+      UPDATE ticket_messages
+      SET status = 'read', read_at = CURRENT_TIMESTAMP, 
+          delivered_at = COALESCE(delivered_at, CURRENT_TIMESTAMP)
+      WHERE ticket_id = ? 
+      AND sender_type IN (${placeholders})
+      AND read_at IS NULL
+    `;
+    
+    await pool.query(query, [ticketId, ...senderType]);
+  } else {
+    // Если у нас один тип отправителя
+    await pool.query(`
+      UPDATE ticket_messages
+      SET status = 'read', read_at = CURRENT_TIMESTAMP, 
+          delivered_at = COALESCE(delivered_at, CURRENT_TIMESTAMP)
+      WHERE ticket_id = ? 
+      AND sender_type = ?
+      AND read_at IS NULL
+    `, [ticketId, senderType]);
+  }
   
   console.log(`Отмечено ${messagesToMark.length} сообщений как прочитанные`);
   console.log(`${messagesToMark.length} хабарлама оқылды деп белгіленді`);

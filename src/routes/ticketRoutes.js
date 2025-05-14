@@ -5,7 +5,7 @@ const ticketController = require('../controllers/ticketController');
 const messageController = require('../controllers/messageController');
 const multer = require('multer');
 const path = require('path');
-const { authenticateJWT } = require('../middleware/auth');
+const { authenticateJWT, isAdmin, isModeratorOrAdmin, hasRole } = require('../middleware/auth');
 
 // Настройка для загрузки файлов
 const storage = multer.diskStorage({
@@ -56,20 +56,21 @@ const devAuth = (req, res, next) => {
 };
 
 // Маршруты для работы с заявками
-router.post('/', ticketController.createTicket);
-router.get('/', ticketController.getTickets);
-router.get('/:id', ticketController.getTicketById);
-router.put('/:id', ticketController.updateTicket);
-router.delete('/:id', ticketController.deleteTicket);
-router.patch('/:id/status', ticketController.updateTicketStatus);
+router.post('/', authenticateJWT, ticketController.createTicket); // Все могут создавать заявки
+router.get('/', authenticateJWT, ticketController.getTickets); // Все могут получать заявки (фильтрация в контроллере)
+router.get('/analytics', authenticateJWT, isModeratorOrAdmin, ticketController.getTicketsAnalytics); // Только модераторы и администраторы
+router.get('/:id', authenticateJWT, ticketController.getTicketById); // Все могут просматривать заявку
+router.put('/:id', authenticateJWT, isModeratorOrAdmin, ticketController.updateTicket); // Только модераторы и администраторы
+router.delete('/:id', authenticateJWT, isAdmin, ticketController.deleteTicket); // Только администраторы
+router.patch('/:id/status', authenticateJWT, isModeratorOrAdmin, ticketController.updateTicketStatus); // Только модераторы и администраторы
 
 // Добавляем маршруты для работы с сообщениями заявок
-router.get('/:ticketId/messages', messageController.getTicketMessages);
-router.post('/:ticketId/messages', devAuth, messageController.addMessage);
-router.put('/:ticketId/messages/read', devAuth, messageController.markMessagesAsRead);
-router.post('/:ticketId/attachments', devAuth, upload.single('file'), messageController.uploadAttachment);
+router.get('/:ticketId/messages', authenticateJWT, messageController.getTicketMessages); // Все могут просматривать сообщения
+router.post('/:ticketId/messages', authenticateJWT, messageController.addMessage); // Все могут отправлять сообщения
+router.put('/:ticketId/messages/read', authenticateJWT, messageController.markMessagesAsRead); // Все могут отмечать сообщения прочитанными
+router.post('/:ticketId/attachments', authenticateJWT, upload.single('file'), messageController.uploadAttachment); // Все могут загружать вложения
 
-// Обновление статуса сообщения в контексте заявки
-router.put('/:ticketId/messages/:messageId/status', devAuth, messageController.updateMessageStatus);
+// Обновление статуса сообщения в контексте заявки (только модераторы и администраторы)
+router.put('/:ticketId/messages/:messageId/status', authenticateJWT, isModeratorOrAdmin, messageController.updateMessageStatus);
 
 module.exports = router;

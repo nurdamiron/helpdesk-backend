@@ -1,11 +1,16 @@
 // src/controllers/authController.js
 const pool = require('../services/pool');
+const jwt = require('jsonwebtoken');
+
+// Секретный ключ для JWT (в реальном приложении следует использовать переменные окружения)
+const JWT_SECRET = process.env.JWT_SECRET || 'helpdesk-secret-key';
+const JWT_EXPIRES_IN = '24h'; // Токен действителен 24 часа
 
 const authController = {
   // Регистрация пользователя
   register: async (req, res) => {
     try {
-      const { email, password, first_name, last_name } = req.body;
+      const { email, password, first_name, last_name, role } = req.body;
 
       if (!email || !password) {
         return res.status(400).json({ 
@@ -23,10 +28,14 @@ const authController = {
         });
       }
 
+      // Проверяем допустимость роли
+      const validRoles = ['admin', 'support', 'manager', 'user', 'moderator']; // Включаем все возможные роли
+      const userRole = role && validRoles.includes(role) ? role : 'user';
+
       // Сохраняем пароль как есть
       const [result] = await pool.query(
-        'INSERT INTO users (email, password, first_name, last_name) VALUES (?, ?, ?, ?)',
-        [email, password, first_name || null, last_name || null]
+        'INSERT INTO users (email, password, first_name, last_name, role) VALUES (?, ?, ?, ?, ?)',
+        [email, password, first_name || null, last_name || null, userRole]
       );
 
       return res.status(201).json({
@@ -35,7 +44,8 @@ const authController = {
           id: result.insertId,
           email,
           first_name: first_name || null,
-          last_name: last_name || null
+          last_name: last_name || null,
+          role: userRole
         }
       });
     } catch (error) {
@@ -51,8 +61,10 @@ const authController = {
   login: async (req, res) => {
     try {
       const { email, password } = req.body;
+      console.log('Login attempt for email:', email);
 
       if (!email || !password) {
+        console.log('Login failed: Email and password are required');
         return res.status(400).json({ 
           status: 'error',
           error: 'Email и пароль обязательны' 
@@ -60,8 +72,12 @@ const authController = {
       }
 
       // Поиск пользователя
+      console.log('Querying database for user with email:', email);
       const [users] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
+      console.log('Found users:', users.length);
+      
       if (users.length === 0) {
+        console.log('Login failed: User not found');
         return res.status(401).json({ 
           status: 'error',
           error: 'Неверные учетные данные' 
@@ -69,18 +85,46 @@ const authController = {
       }
 
       const user = users[0];
+      console.log('User found with role:', user.role);
 
       // Проверка пароля напрямую
-      if (user.password !== password) {
+      console.log('Password comparison:');
+      console.log('From DB:', JSON.stringify(user.password));
+      console.log('From request:', JSON.stringify(password));
+      console.log('Length DB:', user.password.length);
+      console.log('Length request:', password.length);
+      console.log('Char codes DB:', [...user.password].map(c => c.charCodeAt(0)));
+      console.log('Char codes request:', [...password].map(c => c.charCodeAt(0)));
+      console.log('Trimmed comparison:', user.password.trim() === password.trim());
+      
+      // Try multiple variants of password comparison
+      if (user.password !== password && 
+          user.password !== password.trim() &&
+          user.password.trim() !== password) {
+        console.log('Login failed: Password mismatch');
         return res.status(401).json({ 
           status: 'error',
           error: 'Неверные учетные данные' 
         });
       }
+      
+      console.log('Login successful for user ID:', user.id);
+
+      // Создаем JWT токен
+      const token = jwt.sign(
+        { 
+          id: user.id,
+          email: user.email,
+          role: user.role || 'user'
+        }, 
+        JWT_SECRET, 
+        { expiresIn: JWT_EXPIRES_IN }
+      );
 
       // Успешный вход
       return res.json({
         status: 'success',
+        token,
         user: {
           id: user.id,
           email: user.email,
@@ -157,11 +201,31 @@ const authController = {
     }
   },
   
+  // Получение пользователя по ID
+  getUser: async (req, res) => {
+    try {
+      const { id } = req.params;
+      const [rows] = await pool.query(
+        'SELECT id, email, first_name, last_name, role, created_at FROM users WHERE id = ?',
+        [id]
+      );
+      
+      if (rows.length === 0) {
+        return res.status(404).json({ error: 'Пользователь не найден' });
+      }
+      
+      return res.json(rows[0]);
+    } catch (error) {
+      console.error('Error fetching user:', error);
+      res.status(500).json({ error: 'Ошибка при получении данных пользователя' });
+    }
+  },
+  
   // Обновление пользователя
   updateUser: async (req, res) => {
     try {
       const { id } = req.params;
-      const { first_name, last_name, password } = req.body;
+      const { first_name, last_name, password, role } = req.body;
 
       const [ex] = await pool.query('SELECT id FROM users WHERE id=?', [id]);
       if (!ex.length) {
@@ -176,16 +240,22 @@ const authController = {
         );
       }
 
+      // Проверяем допустимость роли
+      const validRoles = ['admin', 'support', 'manager', 'user', 'moderator']; // Включаем все возможные роли
+      const userRole = role && validRoles.includes(role) ? role : null;
+
       // Обновляем остальные поля
       await pool.query(
         `UPDATE users SET
           first_name=COALESCE(?, first_name),
           last_name=COALESCE(?, last_name),
+          role=COALESCE(?, role),
           updated_at=CURRENT_TIMESTAMP
         WHERE id=?`,
         [
           first_name, 
           last_name, 
+          userRole,
           id
         ]
       );

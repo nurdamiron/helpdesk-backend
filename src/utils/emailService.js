@@ -1,6 +1,14 @@
 // src/utils/emailService.js
 const nodemailer = require('nodemailer');
 
+// Логирование SMTP конфигурации при запуске (без пароля)
+console.log('SMTP Configuration:', {
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: process.env.SMTP_PORT || 587,
+    secure: process.env.SMTP_SECURE === 'true' ? true : false,
+    user: process.env.SMTP_USER || process.env.EMAIL_USER,
+});
+
 // Создаем транспорт для отправки email, используя SMTP настройки
 const transporter = nodemailer.createTransport({
     host: process.env.SMTP_HOST || 'smtp.gmail.com',
@@ -126,12 +134,75 @@ const sendTicketCreationNotification = async (email, ticket) => {
         return;
     }
     
+    console.log('Attempting to send ticket notification to:', email);
+    console.log('Ticket data:', JSON.stringify(ticket, null, 2));
+    console.log('SMTP settings:', {
+        host: process.env.SMTP_HOST || 'smtp.gmail.com',
+        port: process.env.SMTP_PORT || 587,
+        secure: process.env.SMTP_SECURE === 'true' ? true : false,
+        auth: {
+            user: process.env.SMTP_USER || process.env.EMAIL_USER,
+            // Не логируем пароль из соображений безопасности
+            pass: '********'
+        }
+    });
+    
     const ticketNumber = ticket.id || 'N/A';
     const ticketSubject = ticket.subject || 'Көрсетілмеген';
-    const customerName = ticket.metadata?.requester?.full_name || email;
+    
+    // Попытка получить имя пользователя из разных источников
+    let customerName = email;
+    let requesterData = null;
+    
+    // Проверяем наличие данных в metadata
+    if (ticket.metadata) {
+        // Если metadata - строка, парсим JSON
+        let metadata = ticket.metadata;
+        if (typeof metadata === 'string') {
+            try {
+                metadata = JSON.parse(metadata);
+            } catch (e) {
+                console.error('Ошибка парсинга metadata:', e);
+                metadata = {};
+            }
+        }
+        
+        // Проверяем metadata.requester
+        if (metadata.requester && metadata.requester.full_name) {
+            customerName = metadata.requester.full_name;
+            requesterData = metadata.requester;
+            console.log('Found requester data in metadata.requester:', requesterData);
+        }
+    }
+    
+    // Проверяем наличие данных в requester_metadata
+    if (!requesterData && ticket.requester_metadata) {
+        let requesterMetadata = ticket.requester_metadata;
+        if (typeof requesterMetadata === 'string') {
+            try {
+                requesterMetadata = JSON.parse(requesterMetadata);
+            } catch (e) {
+                console.error('Ошибка парсинга requester_metadata:', e);
+                requesterMetadata = {};
+            }
+        }
+        
+        // Проверяем вложенные структуры
+        if (requesterMetadata.requester && requesterMetadata.requester.full_name) {
+            customerName = requesterMetadata.requester.full_name;
+            requesterData = requesterMetadata.requester;
+            console.log('Found requester data in requester_metadata.requester:', requesterData);
+        } else if (requesterMetadata.full_name) {
+            customerName = requesterMetadata.full_name;
+            requesterData = requesterMetadata;
+            console.log('Found requester data directly in requester_metadata:', requesterData);
+        }
+    }
+    
+    console.log('Using customer name:', customerName);
     
     const mailOptions = {
-        from: process.env.EMAIL_USER,
+        from: `"HelpDesk" <${process.env.SMTP_USER || process.env.EMAIL_USER || 'nurdamiron@gmail.com'}>`,
         to: email,
         subject: `Өтініш #${ticketNumber} қабылданды - HelpDesk`,
         html: `
@@ -233,11 +304,51 @@ const sendTicketCreationNotification = async (email, ticket) => {
     };
 
     try {
-        await transporter.sendMail(mailOptions);
-        console.log(`Ticket creation notification sent to: ${email}`);
+        console.log('Sending email with options:', {
+            from: mailOptions.from,
+            to: mailOptions.to,
+            subject: mailOptions.subject
+        });
+        
+        // Выполняем проверку подключения к SMTP серверу перед отправкой
+        console.log('Testing SMTP connection...');
+        await new Promise((resolve, reject) => {
+            transporter.verify(function (error, success) {
+                if (error) {
+                    console.error('SMTP connection error:', error);
+                    reject(error);
+                } else {
+                    console.log('SMTP connection successful:', success);
+                    resolve(success);
+                }
+            });
+        });
+        
+        // Отправляем письмо
+        console.log('Sending email...');
+        const info = await transporter.sendMail(mailOptions);
+        console.log(`Ticket notification sent successfully to: ${email}`);
+        console.log('Email info:', info);
         return true;
     } catch (error) {
         console.error('Error sending ticket notification email:', error);
+        console.error('Error details:', {
+            code: error.code,
+            command: error.command,
+            response: error.response,
+            responseCode: error.responseCode,
+            stack: error.stack
+        });
+        
+        // Дополнительное логирование для Gmail SMTP ошибок
+        if (error.message && error.message.includes('Invalid login')) {
+            console.error('Gmail SMTP authentication failed. This could be due to:');
+            console.error('1. Incorrect username or password');
+            console.error('2. Less secure app access is disabled in your Google account');
+            console.error('3. 2-step verification is enabled but no App Password is used');
+            console.error('Please check your Gmail settings at: https://myaccount.google.com/security');
+        }
+        
         throw error;
     }
 };

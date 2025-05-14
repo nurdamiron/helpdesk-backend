@@ -21,6 +21,7 @@ const whitelist = [
   'http://localhost:5002',
   'http://localhost:3000',
   'http://localhost:3001',
+  'http://localhost:3004',
   'http://localhost:3030',
   'https://helpdesk-ten-omega.vercel.app',
   'https://helpdesk-client-iota.vercel.app',
@@ -96,6 +97,33 @@ app.use('/api/chat', chatRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/employees', employeeRoutes);
 app.use('/api/tickets', ticketRoutes);
+
+// Специальный маршрут для проверки доступности WebSocket сервера
+// Клиенты будут делать HTTP запросы к /ws перед WebSocket подключением
+app.get('/ws', (req, res) => {
+  const { userId, userType } = req.query;
+  
+  console.log('HTTP проверка WebSocket сервера:');
+  console.log('- IP:', req.ip);
+  console.log('- User-Agent:', req.headers['user-agent']);
+  console.log('- Параметры:', req.query);
+  
+  res.status(200).json({
+    status: 'success',
+    message: 'WebSocket сервер доступен. Используйте WebSocket клиент для подключения к этому URL.',
+    available: true,
+    server_time: new Date().toISOString(),
+    connection_info: {
+      protocol: 'ws',
+      path: '/ws',
+      params: {
+        userId: userId || 'required',
+        userType: userType || 'required',
+        t: 'timestamp для предотвращения кеширования'
+      }
+    }
+  });
+});
 
 // Добавьте новый API endpoint для информации о чате
 app.get('/api/chat/info', (req, res) => {
@@ -233,10 +261,21 @@ app.use('*', (req, res) => {
 const PORT = process.env.PORT || 5002;
 
 // Проверка соединения с базой данных перед запуском сервера
-pool.testConnection().then(isConnected => {
+pool.testConnection().then(async isConnected => {
   if (!isConnected) {
     console.error('ОШИБКА: Не удалось подключиться к базе данных. Проверьте настройки.');
     process.exit(1);
+  }
+  
+  // Заполнение демо-данными в режиме разработки
+  if (process.env.NODE_ENV === 'development' || true) {
+    try {
+      // Добавляем демо-данные
+      await require('./seedDemoData');
+      console.log('Демо-данные успешно загружены');
+    } catch (error) {
+      console.error('Ошибка при загрузке демо-данных:', error);
+    }
   }
   
   app.listen(PORT, () => {

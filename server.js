@@ -63,6 +63,14 @@ startServer();
  */
 async function startServer() {
   try {
+    // Явно выводим переменные окружения для диагностики
+    console.log('=================================');
+    console.log('ENVIRONMENT VARIABLES:');
+    console.log(`NODE_ENV: ${process.env.NODE_ENV}`);
+    console.log(`PORT: ${process.env.PORT}`);
+    console.log(`WS_URL: ${process.env.WS_URL || 'not set'}`);
+    console.log('=================================');
+    
     // Проверяем подключение к БД
     // Дерекқор қосылымын тексереміз
     const isConnected = await pool.testConnection();
@@ -86,17 +94,130 @@ async function startServer() {
     // HTTP серверін құрамыз
     const server = http.createServer(app);
     
-    // Инициализируем WebSocket Manager
-    // WebSocket Manager инициализациялау
-    try {
-      webSocketManager.init(server, finalPort);
-      // Store WebSocket server reference globally for controller access
-      global.wsServer = webSocketManager;
-      console.log('WebSocket server initialized successfully');
-    } catch (wsError) {
-      console.error('Error initializing WebSocket server:', wsError);
-      console.log('Application will continue without WebSocket support');
-    }
+    // Добавляем обработчик HTTP запросов к /ws в приложение Express для проверки доступности
+    app.get('/ws', (req, res) => {
+      console.log('HTTP запрос к WebSocket эндпоинту:');
+      console.log('- URL:', req.url);
+      console.log('- IP:', req.ip);
+      console.log('- User-Agent:', req.headers['user-agent']);
+      console.log('- Параметры:', req.query);
+      
+      res.status(200).json({
+        status: 'success',
+        message: 'WebSocket сервер доступен. Используйте WebSocket клиент для подключения.',
+        available: true,
+        server_time: new Date().toISOString(),
+        port: finalPort,
+        websocket_url: `ws://localhost:${finalPort}/ws`,
+        connection_params: {
+          userId: 'required parameter',
+          userType: 'required parameter (requester/staff)',
+          t: 'timestamp for cache prevention'
+        }
+      });
+    });
+    
+    // Настраиваем CORS для WebSocket соединений
+    const wsOptions = {
+      noServer: true, // Важно: используем noServer вместо server
+      clientTracking: true,
+      path: '/ws',
+      perMessageDeflate: {
+        zlibDeflateOptions: {
+          chunkSize: 1024,
+          memLevel: 7,
+          level: 3
+        },
+        zlibInflateOptions: {
+          chunkSize: 10 * 1024
+        },
+        concurrencyLimit: 10,
+        threshold: 1024
+      }
+    };
+    
+    // Инициализируем WebSocket Manager с нашими опциями
+    webSocketManager.initWithOptions(null, finalPort, wsOptions); // null вместо server - используем noServer mode
+    global.wsServer = webSocketManager;
+    console.log('WebSocket server initialized successfully with custom options');
+    console.log(`WebSocket endpoint is available at: ws://localhost:${finalPort}/ws`);
+    
+    // Явная обработка WebSocket upgrade запросов
+    server.on('upgrade', (request, socket, head) => {
+      // Проверяем путь запроса
+      let pathname;
+      try {
+        pathname = new URL(request.url, `http://${request.headers.host}`).pathname;
+      } catch (e) {
+        console.error('Error parsing request URL:', e);
+        pathname = request.url.split('?')[0]; // Fallback для старых браузеров
+      }
+      
+      console.log(`WebSocket upgrade request received for: ${pathname}`);
+      
+      // Проверка CORS для WebSocket
+      const origin = request.headers.origin;
+      const isAllowed = !origin || 
+        origin.startsWith('http://localhost:') || 
+        origin.includes('helpdesk-client') || 
+        origin.includes('helpdesk-admin');
+      
+      if (!isAllowed) {
+        console.warn(`WebSocket соединение отклонено из-за CORS: ${origin}`);
+        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      
+      // Если это запрос к нашему WebSocket пути
+      if (pathname === '/ws') {
+        console.log('Handling WebSocket upgrade for /ws path');
+        
+        // Парсим параметры запроса
+        let params;
+        try {
+          params = new URL(request.url, `http://${request.headers.host}`).searchParams;
+        } catch (e) {
+          // Ручной парсинг параметров для обратной совместимости
+          params = new URLSearchParams(request.url.split('?')[1] || '');
+        }
+        
+        const userId = params.get('userId');
+        const userType = params.get('userType');
+        
+        // Проверяем обязательные параметры
+        if (!userId || !userType) {
+          console.warn('WebSocket соединение отклонено: отсутствуют обязательные параметры');
+          socket.write('HTTP/1.1 400 Bad Request\r\n\r\n');
+          socket.destroy();
+          return;
+        }
+        
+        // Обрабатываем upgrade запрос через WebSocketServer
+        if (webSocketManager.wss) {
+          try {
+            webSocketManager.wss.handleUpgrade(request, socket, head, (ws) => {
+              console.log('WebSocket upgrade successful, emitting connection event');
+              // Передаем соединение в наш обработчик
+              webSocketManager.handleExternalConnection(ws, request);
+            });
+          } catch (error) {
+            console.error('Error in handleUpgrade:', error);
+            socket.write('HTTP/1.1 500 Internal Server Error\r\n\r\n');
+            socket.destroy();
+          }
+        } else {
+          console.error('WebSocketServer not available for handling upgrade');
+          socket.write('HTTP/1.1 503 Service Unavailable\r\n\r\n');
+          socket.destroy();
+        }
+      } else {
+        // Закрываем соединение для неизвестных путей
+        console.log(`Rejected WebSocket upgrade for unknown path: ${pathname}`);
+        socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+        socket.destroy();
+      }
+    });
     
     // Запускаем сервер на выбранном порту
     // ВАЖНО: используем server.listen вместо app.listen
@@ -113,6 +234,33 @@ async function startServer() {
       console.log('Available WebSocket endpoint:');
       console.log(`ws://localhost:${finalPort}/ws?userId=[id]&userType=[type]`);
       console.log('=================================');
+      
+      // Добавляем обработчик HTTP запросов к /ws для проверки доступности сервера
+      app.use('/ws', (req, res, next) => {
+        // Проверяем, что это HTTP запрос к /ws, а не WebSocket
+        if (!req.headers.upgrade || req.headers.upgrade.toLowerCase() !== 'websocket') {
+          // Это HTTP запрос к /ws эндпоинту
+          console.log('HTTP request to WebSocket endpoint detected');
+          console.log('Client is checking WebSocket availability');
+          console.log('Headers:', JSON.stringify(req.headers, null, 2));
+          console.log('Query params:', JSON.stringify(req.query, null, 2));
+          console.log('Remote IP:', req.ip);
+          
+          // Уведомляем клиента как правильно подключиться
+          return res.status(200).json({
+            message: 'WebSocket endpoint is available at this URL. To connect, use a WebSocket client instead of HTTP request.',
+            available: true,
+            port: finalPort,
+            websocket_url: `ws://localhost:${finalPort}/ws`,
+            server_time: new Date().toISOString(),
+            environment: process.env.NODE_ENV,
+            connected_clients: webSocketManager.countClients()
+          });
+        } else {
+          // Если это запрос на апгрейд - пропускаем дальше
+          next();
+        }
+      });
     });
     
     // Обработчики процесса

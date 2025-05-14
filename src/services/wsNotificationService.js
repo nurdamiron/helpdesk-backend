@@ -1,4 +1,5 @@
 // src/services/wsNotificationService.js
+const pool = require('./pool');
 
 /**
  * Отправляет уведомление через WebSocket о новом сообщении
@@ -134,7 +135,10 @@ exports.handleWebSocketNotification = async (message, ticket, senderType, sender
         });
         return true;
       } else {
-        // Если получатель - клиент, находим его ID из заявки
+        // Импортируем модуль pool в начале файла
+const pool = require('./pool');
+
+// Если получатель - клиент, находим его ID из заявки
         // Егер алушы клиент болса, оның идентификаторын өтінімнен табамыз
         try {
           const [tickets] = await pool.query(

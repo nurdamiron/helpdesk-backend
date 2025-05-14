@@ -13,6 +13,10 @@ router.post('/', userController.createUser);
 router.get('/:id', userController.getUserById);
 // обновить
 router.put('/:id', userController.updateUser);
+// обновить пароль
+router.put('/:id/password', userController.updatePassword);
+// обновить настройки
+router.put('/:id/settings', userController.updateSettings);
 // удалить
 router.delete('/:id', userController.deleteUser);
 

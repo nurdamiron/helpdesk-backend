@@ -113,7 +113,9 @@ for attempt in range(max_retries):
     try:
         # Подключение к MySQL
         db = mysql.connector.connect(
-            host=os.getenv("DB_HOST", "biz360.czwiyugwum02.eu-north-1.rds.amazonaws.com"),
+            host=os.getenv(
+                "DB_HOST", "biz360.czwiyugwum02.eu-north-1.rds.amazonaws.com"
+            ),
             user=os.getenv("DB_USER", "root"),
             password=os.getenv("DB_PASSWORD", "nurda0101"),
             port=int(os.getenv("DB_PORT", "3306")),
@@ -253,3 +255,23 @@ logger.info("Таблица ticket_attachments создана или уже су
 cursor.close()
 db.close()
 logger.info("Скрипт инициализации базы данных успешно выполнен")
+
+# Добавление поля user_id в таблицу tickets
+addUserIdToTickets = """
+ALTER TABLE tickets 
+ADD COLUMN user_id int DEFAULT NULL AFTER employee_id,
+ADD FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL;
+"""
+
+# Обновление существующих записей
+updateExistingTickets = """
+UPDATE tickets t
+JOIN employees e ON t.employee_id = e.id
+JOIN users u ON e.email = u.email
+SET t.user_id = u.id
+WHERE t.user_id IS NULL;
+"""
+
+# В функции applyMigrations добавляем:
+await pool.query(addUserIdToTickets)
+await pool.query(updateExistingTickets)
