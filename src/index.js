@@ -29,7 +29,29 @@ const whitelist = [
 
 const corsOptions = {
   origin: (origin, callback) => {
-    if (!origin || whitelist.includes(origin)) {
+    // Разрешаем запросы без origin (например, мобильные приложения)
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    
+    // Проверяем whitelist
+    if (whitelist.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+    
+    // Разрешаем все локальные IP адреса (192.168.x.x, 10.x.x.x, 172.16-31.x.x)
+    const localIpPattern = /^https?:\/\/(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3}|10\.\d{1,3}\.\d{1,3}\.\d{1,3}|172\.(1[6-9]|2[0-9]|3[0-1])\.\d{1,3}\.\d{1,3})(:\d+)?$/;
+    
+    // Разрешаем все домены Vercel
+    const vercelPattern = /^https:\/\/.*\.vercel\.app$/;
+    
+    if (localIpPattern.test(origin)) {
+      console.log('Разрешен локальный источник:', origin);
+      callback(null, true);
+    } else if (vercelPattern.test(origin)) {
+      console.log('Разрешен Vercel домен:', origin);
       callback(null, true);
     } else {
       console.log('Заблокирован источник:', origin);
