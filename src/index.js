@@ -11,7 +11,6 @@ const pool = require('./config/database');
 const ticketRoutes = require('./routes/ticketRoutes');
 const userRoutes = require('./routes/userRoutes');
 const authRoutes = require('./routes/authRoutes');
-const chatRoutes = require('./routes/chatRoutes');
 const messageRoutes = require('./routes/messageRoutes');
 const employeeRoutes = require('./routes/employeeRoutes');
 const app = express();
@@ -93,51 +92,11 @@ app.use(requestLogger);
 // Подключение маршрутов
 app.use('/api/users', userRoutes);
 app.use('/api/auth', authRoutes);
-app.use('/api/chat', chatRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/employees', employeeRoutes);
 app.use('/api/tickets', ticketRoutes);
 
-// Специальный маршрут для проверки доступности WebSocket сервера
-// Клиенты будут делать HTTP запросы к /ws перед WebSocket подключением
-app.get('/ws', (req, res) => {
-  const { userId, userType } = req.query;
-  
-  console.log('HTTP проверка WebSocket сервера:');
-  console.log('- IP:', req.ip);
-  console.log('- User-Agent:', req.headers['user-agent']);
-  console.log('- Параметры:', req.query);
-  
-  res.status(200).json({
-    status: 'success',
-    message: 'WebSocket сервер доступен. Используйте WebSocket клиент для подключения к этому URL.',
-    available: true,
-    server_time: new Date().toISOString(),
-    connection_info: {
-      protocol: 'ws',
-      path: '/ws',
-      params: {
-        userId: userId || 'required',
-        userType: userType || 'required',
-        t: 'timestamp для предотвращения кеширования'
-      }
-    }
-  });
-});
 
-// Добавьте новый API endpoint для информации о чате
-app.get('/api/chat/info', (req, res) => {
-  res.json({
-    status: 'success',
-    websocketUrl: `${process.env.WS_URL || 'ws://localhost:' + PORT}/ws`,
-    features: {
-      typing_indicator: true,
-      read_receipts: true,
-      delivery_status: true,
-      file_uploads: true
-    }
-  });
-});
 
 // Корневой endpoint с информацией об API
 app.get('/', (req, res) => {
@@ -267,16 +226,7 @@ pool.testConnection().then(async isConnected => {
     process.exit(1);
   }
   
-  // Заполнение демо-данными в режиме разработки
-  if (process.env.NODE_ENV === 'development' || true) {
-    try {
-      // Добавляем демо-данные
-      await require('./seedDemoData');
-      console.log('Демо-данные успешно загружены');
-    } catch (error) {
-      console.error('Ошибка при загрузке демо-данных:', error);
-    }
-  }
+  // Демо-данные были удалены из проекта
   
   // Не запускаем сервер здесь - это делается в server.js
   // НЕ ЗАПУСКАЙТЕ app.listen здесь, это приводит к ошибке EADDRINUSE!

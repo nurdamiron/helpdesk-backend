@@ -3,18 +3,22 @@ const nodemailer = require('nodemailer');
 const pool = require('../config/database');
 const { sendTicketCreationNotification } = require('../utils/emailService');
 
-// Маппинги для локализации
+// Маппинги для локализации категорий службы поддержки
 const CATEGORY_MAP = {
-  'repair': 'Жөндеу жұмыстары',
-  'plumbing': 'Сантехника',
-  'electrical': 'Электрика',
-  'construction': 'Құрылыс',
-  'design': 'Жобалау',
-  'consultation': 'Кеңес беру',
-  'estimate': 'Смета және есептеулер',
-  'materials': 'Материалдар',
-  'warranty': 'Кепілдік жағдайы',
-  'other': 'Басқа'
+  'technical': 'Техническая проблема',
+  'billing': 'Биллинг и расчеты',
+  'general': 'Общие вопросы',
+  'it_support': 'IT поддержка',
+  'equipment_issue': 'Проблемы с оборудованием',
+  'software_issue': 'Проблемы с ПО',
+  'access_request': 'Запрос доступа',
+  'complaint': 'Жалоба',
+  'suggestion': 'Предложение',
+  'hr_question': 'Вопрос по HR',
+  'safety_issue': 'Вопрос безопасности',
+  'training_request': 'Запрос на обучение',
+  'policy_question': 'Вопрос по политикам',
+  'other': 'Другое'
 };
 
 const PRIORITY_MAP = {
@@ -25,19 +29,24 @@ const PRIORITY_MAP = {
 };
 
 const STATUS_MAP = {
-  'new': 'Жаңа', // Новый
-  'in_review': 'Қарастыру үстінде', // На рассмотрении
-  'in_progress': 'Жұмыс істеуде', // В работе
-  'pending': 'Жауап күтілуде', // Ожидает ответа
-  'resolved': 'Шешілген', // Решен
-  'closed': 'Жабылған' // Закрыт
+  'new': 'Новая',
+  'whatsapp_pending': 'Ожидает отправки WhatsApp',
+  'in_review': 'На рассмотрении',
+  'in_progress': 'В работе',
+  'pending': 'Ожидает ответа',
+  'resolved': 'Решена',
+  'closed': 'Закрыта'
 };
 
 const TYPE_MAP = {
-  'complaint': 'Шағым', // Жалоба
-  'suggestion': 'Ұсыныс', // Предложение
-  'request': 'Сұраныс', // Запрос
-  'other': 'Басқа' // Другое
+  'support_request': 'Запрос поддержки',
+  'incident': 'Инцидент', 
+  'complaint': 'Жалоба',
+  'suggestion': 'Предложение по улучшению',
+  'access_request': 'Запрос доступа',
+  'information_request': 'Запрос информации',
+  'emergency': 'Срочная проблема',
+  'other': 'Другое'
 };
 
 const PROPERTY_TYPE_MAP = {
@@ -66,9 +75,10 @@ exports.createTicket = async (req, res) => {
     const { 
       subject, 
       description, 
-      type = 'request', 
+      type = 'support_request', 
       priority = 'medium', 
-      category = 'general',
+      category = 'technical',
+      status = 'new',
       metadata = {},
       requester_metadata = {},
       user_id = null // Добавляем возможность передать ID пользователя
@@ -111,11 +121,11 @@ exports.createTicket = async (req, res) => {
     
     // В этой версии не используем employee_id - сотрудники хранятся в metadata
 
-    // Вставка заявки с user_id
+    // Вставка заявки с user_id и переданным статусом
     const [result] = await pool.query(
-      `INSERT INTO tickets (subject, description, priority, category, status, metadata, requester_metadata, user_id) 
-       VALUES (?, ?, ?, ?, 'new', ?, ?, ?)`,
-      [subject, description, priority, category, metadataJSON, requesterMetadataJSON, userId]
+      `INSERT INTO tickets (subject, description, type, priority, category, status, metadata, requester_metadata, user_id) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [subject, description, type, priority, category, status, metadataJSON, requesterMetadataJSON, userId]
     );
 
     // Получаем данные заявки для ответа

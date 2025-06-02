@@ -231,9 +231,7 @@ INSERT INTO categories (name, description, department_id) VALUES
 (6, 'Payments', 'Payment related issues', 3),
 (7, 'Reporting', 'Financial reporting issues', 3);
 
--- Initial data: Admin user
-INSERT INTO users (email, password, first_name, last_name, position, role) VALUES
-('admin@example.com', '$2b$10$X9Ej0UcuPHKB4XyaRCVhkO1sPvwWhBIJPIz3.lFPyk.Fci6Y2/dJG', 'Admin', 'User', 'System Administrator', 'admin');
-
--- Add default settings for admin
-INSERT INTO user_settings (user_id, language) VALUES (1, 'kk');
+-- NOTE: Create your initial admin user after installation
+-- Example command (run in MySQL):
+-- INSERT INTO users (email, password, first_name, last_name, position, role) VALUES
+-- ('your-admin@yourdomain.com', '$2b$10$YOUR_HASHED_PASSWORD', 'Admin', 'User', 'System Administrator', 'admin');

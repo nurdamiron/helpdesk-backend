@@ -10,10 +10,10 @@ const isDevelopment = process.env.NODE_ENV === 'development' || true; // По у
 
 // Демо пользователи для разработки - роли соответствуют ролям в базе данных
 const mockUsers = [
-    { id: 1, email: 'admin@example.com', first_name: 'Админ', last_name: 'Системы', role: 'admin' },
-    { id: 2, email: 'support@example.com', first_name: 'Поддержка', last_name: 'Клиентов', role: 'support' },
-    { id: 3, email: 'manager@example.com', first_name: 'Менеджер', last_name: 'Отдела', role: 'manager' },
-    { id: 4, email: 'user@example.com', first_name: 'Обычный', last_name: 'Пользователь', role: 'user' }
+    { id: 1, email: 'admin@localhost', first_name: 'Админ', last_name: 'Системы', role: 'admin' },
+    { id: 2, email: 'support@localhost', first_name: 'Поддержка', last_name: 'Клиентов', role: 'support' },
+    { id: 3, email: 'manager@localhost', first_name: 'Менеджер', last_name: 'Отдела', role: 'manager' },
+    { id: 4, email: 'user@localhost', first_name: 'Обычный', last_name: 'Пользователь', role: 'user' }
 ];
 
 // Middleware для проверки JWT аутентификации

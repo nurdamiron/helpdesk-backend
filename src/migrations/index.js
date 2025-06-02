@@ -4,6 +4,7 @@ const updateUserRolesThreeRole = require('./update_user_roles_three_role');
 const updateTicketMessagesSenderType = require('./update_ticket_messages_sender_type');
 const addTicketMetadataFields = require('./add_ticket_metadata_fields');
 const addUserActiveStatus = require('./add_user_active_status');
+const updateTicketEnumsForHelpdesk = require('./update_ticket_enums_for_helpdesk');
 
 /**
  * Запускает все миграции базы данных
@@ -29,6 +30,9 @@ async function runMigrations() {
     
     // Добавление поля is_active в таблицу users
     await addUserActiveStatus.up();
+    
+    // Обновление enum значений для поддержки системы helpdesk
+    await updateTicketEnumsForHelpdesk();
     
     console.log('Все миграции выполнены успешно');
     process.exit(0);

@@ -43,13 +43,13 @@ const upload = multer({
   limits: { fileSize: 10*1024*1024 } // 10MB
 });
 
-// Для упрощения разработки можно временно отключить проверку авторизации
+// Middleware заглушка для разработки (должен быть заменен на authenticateJWT в продакшене)
 const devAuth = (req, res, next) => {
-  // В реальном проекте используйте auth middleware
-  // В режиме разработки можем имитировать пользователя
+  // TODO: В продакшене замените на authenticateJWT
+  // Временная заглушка для разработки
   req.user = {
     id: 1,
-    email: 'dev@example.com',
+    email: 'dev@localhost',
     role: 'staff'
   };
   next();

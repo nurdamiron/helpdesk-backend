@@ -90,15 +90,7 @@ const update_user_roles = async () => {
     const [userCount] = await pool.query('SELECT COUNT(*) as count FROM users');
     
     if (userCount[0].count === 0) {
-      console.log('Таблица users пуста. Создаем администратора по умолчанию...');
-      
-      // Добавляем администратора по умолчанию, если таблица пуста
-      await pool.query(`
-        INSERT INTO users (email, password, first_name, last_name, role)
-        VALUES ('admin@example.com', 'admin123', 'Admin', 'User', 'admin')
-      `);
-      
-      console.log('Администратор по умолчанию успешно создан.');
+      console.log('Таблица users пуста. Администратор должен быть создан вручную.');
     }
     
     console.log('Миграция ролей пользователей завершена успешно.');
