@@ -19,12 +19,15 @@ const mockUsers = [
 // Middleware для проверки JWT аутентификации
 const authenticateJWT = async (req, res, next) => {
     console.log('Auth middleware triggered');
+    console.log('Headers received:', req.headers);
     
     try {
         if (isDevelopment) {
             // В режиме разработки проверяем наличие токена с приставкой "mock-jwt-token-"
             const authHeader = req.headers['authorization'];
             const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+            console.log('Auth header:', authHeader);
+            console.log('Token extracted:', token);
             
             if (token && token.startsWith('mock-jwt-token-')) {
                 // Извлекаем информацию о пользователе из токена

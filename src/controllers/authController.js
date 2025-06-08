@@ -154,18 +154,26 @@ const authController = {
   // Получение данных текущего пользователя
   getMe: async (req, res) => {
     try {
-      const userId = req.headers['x-user-id'];
-      
-      if (!userId) {
+      // Пользователь уже установлен middleware аутентификации
+      if (!req.user) {
         return res.status(401).json({
           status: 'error',
           error: 'Необходима аутентификация'
         });
       }
       
+      // В режиме разработки возвращаем данные mock пользователя
+      if (process.env.NODE_ENV !== 'production') {
+        return res.json({
+          status: 'success',
+          user: req.user
+        });
+      }
+      
+      // В продакшн режиме получаем актуальные данные из базы данных
       const [users] = await pool.query(
         'SELECT id, email, first_name, last_name, role, is_active FROM users WHERE id = ?', 
-        [userId]
+        [req.user.id]
       );
       
       if (users.length === 0) {
