@@ -202,7 +202,7 @@ const sendTicketCreationNotification = async (email, ticket) => {
     console.log('Using customer name:', customerName);
     
     const mailOptions = {
-        from: `"HelpDesk" <${process.env.SMTP_USER || process.env.EMAIL_USER || 'nurdamiron@gmail.com'}>`,
+        from: `"HelpDesk" <${process.env.SMTP_USER || process.env.EMAIL_USER }>`,
         to: email,
         subject: `Өтініш #${ticketNumber} қабылданды - HelpDesk`,
         html: `
@@ -222,7 +222,7 @@ const sendTicketCreationNotification = async (email, ticket) => {
                         background-color: #f8f9fa;
                     }
                     .header {
-                        background: linear-gradient(135deg, #0066cc, #004d99);
+                        background: linear-gradient(135deg,rgb(204, 0, 187),rgb(255, 255, 255));
                         color: white;
                         padding: 30px;
                         text-align: center;
