@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/userController');
+const { authenticateJWT } = require('../middleware/auth');
 
 // логин
 router.post('/login', userController.login);
@@ -17,6 +18,8 @@ router.put('/:id', userController.updateUser);
 router.put('/:id/password', userController.updatePassword);
 // обновить настройки
 router.put('/:id/settings', userController.updateSettings);
+// генерировать токен для Telegram (только админы)
+router.post('/:userId/telegram-token', authenticateJWT, userController.generateTelegramToken);
 // удалить
 router.delete('/:id', userController.deleteUser);
 

@@ -39,14 +39,9 @@ const STATUS_MAP = {
 };
 
 const TYPE_MAP = {
-  'support_request': 'Запрос поддержки',
   'incident': 'Инцидент', 
-  'complaint': 'Жалоба',
-  'suggestion': 'Предложение по улучшению',
-  'access_request': 'Запрос доступа',
-  'information_request': 'Запрос информации',
-  'emergency': 'Срочная проблема',
-  'other': 'Другое'
+  'support_request': 'Запрос',
+  'complaint': 'Жалоба'
 };
 
 const PROPERTY_TYPE_MAP = {
@@ -76,8 +71,7 @@ exports.createTicket = async (req, res) => {
       subject, 
       description, 
       type = 'support_request', 
-      priority = 'medium', 
-      category = 'technical',
+      priority = 'medium',
       status = 'new',
       metadata = {},
       requester_metadata = {},
@@ -123,9 +117,9 @@ exports.createTicket = async (req, res) => {
 
     // Вставка заявки с user_id и переданным статусом
     const [result] = await pool.query(
-      `INSERT INTO tickets (subject, description, type, priority, category, status, metadata, requester_metadata, user_id) 
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [subject, description, type, priority, category, status, metadataJSON, requesterMetadataJSON, userId]
+      `INSERT INTO tickets (subject, description, type, priority, status, metadata, requester_metadata, user_id) 
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [subject, description, type, priority, status, metadataJSON, requesterMetadataJSON, userId]
     );
 
     // Получаем данные заявки для ответа
@@ -224,7 +218,6 @@ exports.getTickets = async (req, res) => {
       status,
       type,
       priority,
-      category,
       search,
       user_id,
       limit = 10,
@@ -266,10 +259,6 @@ exports.getTickets = async (req, res) => {
       query += ' AND t.priority = ?';
       params.push(priority);
     }
-    if (category) {
-      query += ' AND t.category = ?';
-      params.push(category);
-    }
     if (search) {
       query += ' AND (t.subject LIKE ? OR t.description LIKE ?)';
       params.push(`%${search}%`, `%${search}%`);
@@ -306,10 +295,6 @@ exports.getTickets = async (req, res) => {
     if (priority) {
       countQuery += ' AND t.priority = ?';
       countParams.push(priority);
-    }
-    if (category) {
-      countQuery += ' AND t.category = ?';
-      countParams.push(category);
     }
     if (search) {
       countQuery += ' AND (t.subject LIKE ? OR t.description LIKE ?)';
@@ -444,7 +429,6 @@ exports.getTicketById = async (req, res) => {
     // Добавляем локализованные тексты
     ticket.status_text = STATUS_MAP[ticket.status] || ticket.status;
     ticket.priority_text = PRIORITY_MAP[ticket.priority] || ticket.priority;
-    ticket.category_text = CATEGORY_MAP[ticket.category] || ticket.category;
     ticket.type_text = TYPE_MAP[ticket.type] || ticket.type;
     if (ticket.property_type) {
       ticket.property_type_text = PROPERTY_TYPE_MAP[ticket.property_type] || ticket.property_type;
@@ -473,7 +457,6 @@ exports.updateTicket = async (req, res) => {
       description,
       status,
       priority,
-      category,
       type,
       assigned_to,
       deadline,
@@ -528,10 +511,6 @@ exports.updateTicket = async (req, res) => {
     if (priority !== undefined) {
       updateFields.push('priority = ?');
       updateValues.push(priority);
-    }
-    if (category !== undefined) {
-      updateFields.push('category = ?');
-      updateValues.push(category);
     }
     if (assigned_to !== undefined) {
       updateFields.push('assigned_to = ?');
@@ -597,7 +576,6 @@ exports.updateTicket = async (req, res) => {
     // Добавляем локализованные тексты
     ticket.status_text = STATUS_MAP[ticket.status] || ticket.status;
     ticket.priority_text = PRIORITY_MAP[ticket.priority] || ticket.priority;
-    ticket.category_text = CATEGORY_MAP[ticket.category] || ticket.category;
     ticket.type_text = TYPE_MAP[ticket.type] || ticket.type;
     if (ticket.property_type) {
       ticket.property_type_text = PROPERTY_TYPE_MAP[ticket.property_type] || ticket.property_type;

@@ -4,6 +4,7 @@ const http = require('http');
 const app = require('./src/index');
 const pool = require('./src/config/database');
 const net = require('net');
+const HelpdeskTelegramBot = require('./src/services/telegramBot/bot');
 
 /**
  * Порт для запуска сервера
@@ -120,6 +121,19 @@ async function startServer() {
       console.log(`Server started on port ${finalPort}`);
       console.log(`Environment: ${process.env.NODE_ENV}`);
       console.log(`Time: ${new Date().toISOString()}`);
+      
+      // Инициализация Telegram бота
+      if (process.env.TELEGRAM_BOT_TOKEN) {
+        try {
+          const telegramBot = new HelpdeskTelegramBot();
+          console.log('✅ Telegram bot initialized successfully');
+        } catch (error) {
+          console.error('❌ Failed to initialize Telegram bot:', error.message);
+        }
+      } else {
+        console.warn('⚠️  TELEGRAM_BOT_TOKEN not set, Telegram bot is disabled');
+      }
+      
       console.log('=================================');
       
     });

@@ -7,54 +7,13 @@ const JWT_SECRET = process.env.JWT_SECRET || 'helpdesk-secret-key';
 const JWT_EXPIRES_IN = '24h'; // Токен действителен 24 часа
 
 const authController = {
-  // Регистрация пользователя
+  // Регистрация пользователя - ОТКЛЮЧЕНА
+  // Только администратор может создавать новых пользователей через панель управления
   register: async (req, res) => {
-    try {
-      const { email, password, first_name, last_name, role } = req.body;
-
-      if (!email || !password) {
-        return res.status(400).json({ 
-          status: 'error',
-          error: 'Email и пароль обязательны' 
-        });
-      }
-
-      // Проверяем, существует ли уже пользователь
-      const [existingUsers] = await pool.query('SELECT * FROM users WHERE email = ?', [email]);
-      if (existingUsers.length > 0) {
-        return res.status(400).json({ 
-          status: 'error',
-          error: 'Пользователь с таким email уже существует' 
-        });
-      }
-
-      // Проверяем допустимость роли
-      const validRoles = ['admin', 'support', 'manager', 'user', 'moderator']; // Включаем все возможные роли
-      const userRole = role && validRoles.includes(role) ? role : 'user';
-
-      // Сохраняем пароль как есть
-      const [result] = await pool.query(
-        'INSERT INTO users (email, password, first_name, last_name, role) VALUES (?, ?, ?, ?, ?)',
-        [email, password, first_name || null, last_name || null, userRole]
-      );
-
-      return res.status(201).json({
-        status: 'success',
-        user: {
-          id: result.insertId,
-          email,
-          first_name: first_name || null,
-          last_name: last_name || null,
-          role: userRole
-        }
-      });
-    } catch (error) {
-      console.error('Ошибка регистрации:', error);
-      return res.status(500).json({
-        status: 'error',
-        error: 'Внутренняя ошибка сервера'
-      });
-    }
+    return res.status(403).json({ 
+      status: 'error',
+      error: 'Регистрация отключена. Обратитесь к администратору для получения доступа.' 
+    });
   },
 
   // Вход пользователя

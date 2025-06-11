@@ -1,5 +1,6 @@
 // src/controllers/userController.js
 const pool = require('../config/database');
+const crypto = require('crypto');
 
 // Убираем bcrypt вообще
 // const bcrypt = require('bcryptjs'); // <--- Удаляем
@@ -408,5 +409,57 @@ exports.login = async (req, res) => {
   } catch (error) {
     console.error('Ошибка login:', error);
     res.status(500).json({ error: 'Ошибка сервера' });
+  }
+};
+
+// Генерация токена для регистрации в Telegram
+exports.generateTelegramToken = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    
+    // Проверяем права доступа - только админы могут генерировать токены
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({ error: 'Недостаточно прав для выполнения операции' });
+    }
+    
+    // Проверяем существование пользователя
+    const [user] = await pool.query(
+      'SELECT id, email, first_name, last_name, role FROM users WHERE id = ?',
+      [userId]
+    );
+    
+    if (!user.length) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+    
+    // Генерируем уникальный токен
+    const token = crypto.randomBytes(16).toString('hex');
+    
+    // Сохраняем токен в БД
+    await pool.query(
+      'UPDATE users SET registration_token = ? WHERE id = ?',
+      [token, userId]
+    );
+    
+    // Возвращаем токен и ссылку для регистрации
+    res.json({
+      success: true,
+      user: {
+        id: user[0].id,
+        email: user[0].email,
+        name: `${user[0].first_name} ${user[0].last_name}`,
+        role: user[0].role
+      },
+      token,
+      botUrl: `https://t.me/${process.env.TELEGRAM_BOT_USERNAME || 'HelpdeskKZBot'}?start=register_${token}`,
+      instructions: {
+        kk: 'Telegram-да тіркелу үшін сілтемеге өтіп, /register ' + token + ' командасын жіберіңіз',
+        ru: 'Для регистрации в Telegram перейдите по ссылке и отправьте команду /register ' + token,
+        en: 'To register in Telegram, follow the link and send command /register ' + token
+      }
+    });
+  } catch (error) {
+    console.error('Error generateTelegramToken:', error);
+    res.status(500).json({ error: 'Ошибка при генерации токена' });
   }
 };

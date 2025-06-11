@@ -117,6 +117,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/employees', employeeRoutes);
 app.use('/api/tickets', ticketRoutes);
+app.use('/api/statistics', require('./routes/statisticsRoutes'));
 
 
 

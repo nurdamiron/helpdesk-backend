@@ -5,6 +5,8 @@ const updateTicketMessagesSenderType = require('./update_ticket_messages_sender_
 const addTicketMetadataFields = require('./add_ticket_metadata_fields');
 const addUserActiveStatus = require('./add_user_active_status');
 const updateTicketEnumsForHelpdesk = require('./update_ticket_enums_for_helpdesk');
+const addTelegramPendingStatus = require('./add_telegram_pending_status');
+const addTelegramFieldsToUsers = require('./add_telegram_fields_to_users');
 
 /**
  * Запускает все миграции базы данных
@@ -33,6 +35,12 @@ async function runMigrations() {
     
     // Обновление enum значений для поддержки системы helpdesk
     await updateTicketEnumsForHelpdesk();
+    
+    // Добавление статуса telegram_pending
+    await addTelegramPendingStatus();
+    
+    // Добавление полей для Telegram интеграции
+    await addTelegramFieldsToUsers.up();
     
     console.log('Все миграции выполнены успешно');
     process.exit(0);
