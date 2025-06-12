@@ -50,7 +50,7 @@ const devAuth = (req, res, next) => {
   req.user = {
     id: 1,
     email: 'dev@localhost',
-    role: 'staff'
+    role: 'moderator'
   };
   next();
 };

@@ -6,6 +6,7 @@ const fs = require('fs');
 const multer = require('multer');
 require('dotenv').config();
 const pool = require('./config/database');
+const { i18n, localeMiddleware } = require('./config/i18n');
 
 // Импорт маршрутов
 const ticketRoutes = require('./routes/ticketRoutes');
@@ -22,6 +23,7 @@ const whitelist = [
   'http://localhost:3001',
   'http://localhost:3004',
   'http://localhost:3030',
+  'http://localhost:5173',
   'https://helpdesk-ten-omega.vercel.app',
   'https://helpdesk-client-iota.vercel.app',
   'https://helpdesk-admin-three.vercel.app'
@@ -68,6 +70,9 @@ const corsOptions = {
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// i18n middleware
+app.use(localeMiddleware);
 
 // Создание и настройка папки для загрузок
 const uploadsDir = path.join(__dirname, '../uploads');

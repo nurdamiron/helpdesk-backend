@@ -1,5 +1,5 @@
 // src/middleware/auth.js
-const pool = require('../services/pool');
+const pool = require('../config/database');
 const jwt = require('jsonwebtoken');
 
 // Секретный ключ для JWT (должен совпадать с ключом в authController)
@@ -11,9 +11,8 @@ const isDevelopment = process.env.NODE_ENV === 'development' || true; // По у
 // Демо пользователи для разработки - роли соответствуют ролям в базе данных
 const mockUsers = [
     { id: 1, email: 'admin@localhost', first_name: 'Админ', last_name: 'Системы', role: 'admin' },
-    { id: 2, email: 'support@localhost', first_name: 'Поддержка', last_name: 'Клиентов', role: 'support' },
-    { id: 3, email: 'manager@localhost', first_name: 'Менеджер', last_name: 'Отдела', role: 'manager' },
-    { id: 4, email: 'user@localhost', first_name: 'Обычный', last_name: 'Пользователь', role: 'user' }
+    { id: 2, email: 'moderator@localhost', first_name: 'Модератор', last_name: 'Системы', role: 'moderator' },
+    { id: 3, email: 'user@localhost', first_name: 'Обычный', last_name: 'Пользователь', role: 'user' }
 ];
 
 // Middleware для проверки JWT аутентификации
@@ -22,127 +21,84 @@ const authenticateJWT = async (req, res, next) => {
     console.log('Headers received:', req.headers);
     
     try {
-        if (isDevelopment) {
-            // В режиме разработки проверяем наличие токена с приставкой "mock-jwt-token-"
-            const authHeader = req.headers['authorization'];
-            const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
-            console.log('Auth header:', authHeader);
-            console.log('Token extracted:', token);
-            
-            if (token && token.startsWith('mock-jwt-token-')) {
-                // Извлекаем информацию о пользователе из токена
-                // Формат токена: 'mock-jwt-token-{role}'
-                // Если роль не указана, используем admin
-                const userType = token.includes('-admin') ? 'admin' : 
-                                token.includes('-support') ? 'support' :
-                                token.includes('-manager') ? 'manager' :
-                                token.includes('-moderator') ? 'support' : // для совместимости
-                                token.includes('-user') ? 'user' : 'admin';
-                
-                // Находим соответствующего пользователя
-                const mockUser = mockUsers.find(u => u.role === userType) || mockUsers[0];
-                
-                // Устанавливаем пользователя в request
-                req.user = { ...mockUser };
-                console.log('Using mock user:', req.user);
-                return next();
-            }
-            
-            // Если токен существует, но не начинается с 'mock-jwt-token'
-            if (token) {
-                try {
-                    // Попробуем декодировать его как обычный JWT токен
-                    const decoded = jwt.verify(token, JWT_SECRET);
-                    console.log('JWT token verified, decoded ID:', decoded.id);
-                    
-                    // Попробуем найти пользователя в mock users (для разработки)
-                    // Используем ID из токена
-                    const userIndex = parseInt(decoded.id, 10) - 1;
-                    if (userIndex >= 0 && userIndex < mockUsers.length) {
-                        req.user = { ...mockUsers[userIndex] };
-                        console.log('Using mock user by ID from token:', req.user);
-                    } else {
-                        // Если ID не найден, используем роль из токена
-                        const role = decoded.role || 'user';
-                        const mockUser = mockUsers.find(u => u.role === role) || mockUsers[3]; // По умолчанию обычный user
-                        req.user = { ...mockUser, id: decoded.id || mockUser.id };
-                        console.log('Using mock user by role from token:', req.user);
-                    }
-                    return next();
-                } catch (err) {
-                    console.warn('Invalid token in dev mode, using default user:', err.message);
-                }
-            }
-            
-            // Если токен отсутствует или недействителен, используем пользователя user по умолчанию
-            req.user = { ...mockUsers[3] }; // Используем обычного пользователя по умолчанию
-            console.log('Using default mock user (regular user)');
-            return next();
-        }
-        
-        // Для продакшн режима - обычная проверка JWT токена
         const authHeader = req.headers['authorization'];
         const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
-        
+        console.log('Auth header:', authHeader);
+        console.log('Token extracted:', token);
+
+        // Если токен отсутствует
         if (!token) {
-            return res.status(401).json({ 
-                status: 'error',
-                error: 'Необходим токен авторизации' 
-            });
+            if (isDevelopment) {
+                // В development режиме используем пользователя user по умолчанию
+                req.user = { ...mockUsers[2] };
+                console.log('No token, using default mock user (regular user)');
+                return next();
+            } else {
+                return res.status(401).json({ error: 'Токен не предоставлен' });
+            }
         }
 
-        // Проверяем и декодируем JWT токен
-        jwt.verify(token, JWT_SECRET, async (err, decoded) => {
-            if (err) {
-                return res.status(403).json({ 
-                    status: 'error',
-                    error: 'Недействительный или истекший токен' 
-                });
-            }
-
-            console.log('JWT token verified, decoded ID:', decoded.id);
+        // Обработка mock токенов только в development режиме
+        if (isDevelopment && token.startsWith('mock-jwt-token-')) {
+            const userType = token.includes('-admin') ? 'admin' : 
+                            token.includes('-moderator') ? 'moderator' : 
+                            token.includes('-user') ? 'user' : 'user';
             
-            // Получаем актуальные данные пользователя из базы данных
-            const getUserQuery = `
-                SELECT 
-                    id,
-                    email,
-                    first_name,
-                    last_name,
-                    role
-                FROM users
-                WHERE id = ?
-            `;
-            console.log('Executing query to get user data:', getUserQuery, 'with ID:', decoded.id);
-            
-            const [users] = await pool.query(getUserQuery, [decoded.id]);
-            console.log('Database query result:', users);
+            const mockUser = mockUsers.find(u => u.role === userType) || mockUsers[0];
+            req.user = { ...mockUser };
+            console.log('Using mock user:', req.user);
+            return next();
+        }
 
-            if (!users.length) {
-                console.error('User not found in database with ID:', decoded.id);
-                return res.status(401).json({ 
-                    status: 'error',
-                    error: 'Пользователь не найден' 
-                });
+        // Декодируем JWT токен
+        try {
+            const decoded = jwt.verify(token, JWT_SECRET);
+            console.log('JWT token verified, decoded:', decoded);
+            
+            // Ищем пользователя в базе данных
+            const [users] = await pool.query(
+                'SELECT id, email, first_name, last_name, role, is_active FROM users WHERE id = ?',
+                [decoded.id]
+            );
+
+            if (users.length === 0) {
+                if (isDevelopment) {
+                    // В development режиме используем mock пользователя, если реальный не найден
+                    const mockUser = mockUsers.find(u => u.role === decoded.role) || mockUsers[2];
+                    req.user = { ...mockUser, id: decoded.id };
+                    console.log('User not found in DB, using mock user:', req.user);
+                    return next();
+                } else {
+                    return res.status(401).json({ error: 'Пользователь не найден' });
+                }
             }
 
             const user = users[0];
+            
+            // Проверяем активность пользователя
+            if (user.is_active === 0) {
+                return res.status(401).json({ error: 'Аккаунт деактивирован' });
+            }
 
-            // Добавляем данные пользователя в request
-            req.user = {
-                id: user.id,
-                email: user.email,
-                first_name: user.first_name,
-                last_name: user.last_name,
-                role: user.role || 'user'
-            };
+            req.user = user;
+            console.log('Using real user from database:', req.user);
+            return next();
 
-            next();
-        });
+        } catch (err) {
+            console.error('Token verification failed:', err.message);
+            
+            if (isDevelopment) {
+                // В development режиме используем пользователя по умолчанию при ошибке токена
+                req.user = { ...mockUsers[2] };
+                console.log('Invalid token in dev mode, using default user');
+                return next();
+            } else {
+                return res.status(403).json({ error: 'Недействительный токен' });
+            }
+        }
     } catch (error) {
         console.error('Auth middleware error:', error);
         res.status(500).json({ 
-            status: 'error',
             error: 'Внутренняя ошибка сервера' 
         });
     }
@@ -164,13 +120,10 @@ const isAdmin = (req, res, next) => {
 const isModeratorOrAdmin = (req, res, next) => {
     // Проверяем роль, учитывая все допустимые роли из базы данных, которые имеют достаточные права
     // admin - администратор
-    // manager, support - эквиваленты модератора
+    // moderator - модератор
     if (!req.user || (
         req.user.role !== 'admin' && 
-        req.user.role !== 'moderator' && 
-        req.user.role !== 'staff' &&
-        req.user.role !== 'manager' &&
-        req.user.role !== 'support'
+        req.user.role !== 'moderator'
     )) {
         return res.status(403).json({
             status: 'error',

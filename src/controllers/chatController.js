@@ -66,7 +66,7 @@ exports.sendMessage = async (req, res) => {
     const ticket = tickets[0];
     
     // Определяем тип отправителя и его ID
-    const senderType = req.user && req.user.role === 'staff' ? 'staff' : 'requester';
+    const senderType = req.user && ['admin', 'moderator'].includes(req.user.role) ? 'moderator' : 'requester';
     const senderId = req.user ? req.user.id : 1; // Используем ID пользователя из запроса или дефолтное значение
     
     // Добавляем сообщение в базу данных
@@ -217,7 +217,7 @@ exports.sendTypingIndicator = async (req, res) => {
     }
     
     // Определяем тип отправителя и его ID
-    const senderType = req.user && req.user.role === 'staff' ? 'staff' : 'requester';
+    const senderType = req.user && ['admin', 'moderator'].includes(req.user.role) ? 'moderator' : 'requester';
     const senderId = req.user ? req.user.id : 1; // Используем ID пользователя из запроса или дефолтное значение
     
     // Отправляем индикатор набора текста через WebSocket

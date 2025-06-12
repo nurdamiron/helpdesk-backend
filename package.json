@@ -13,7 +13,12 @@
     "test:coverage": "jest --coverage",
     "migrate": "node src/migrations/index.js",
     "db:structure": "node show-db-structure-simple.js",
-    "db:show": "node show-db-structure-simple.js"
+    "db:show": "node show-db-structure-simple.js",
+    "telegram:reset": "node scripts/restart-telegram-bot.js",
+    "telegram:force-reset": "node scripts/force-reset-telegram.js",
+    "telegram:status": "node scripts/check-bot-status.js",
+    "restart:clean": "npm run telegram:reset && npm start",
+    "restart:force": "npm run telegram:force-reset && npm start"
   },
   "keywords": [],
   "author": "",

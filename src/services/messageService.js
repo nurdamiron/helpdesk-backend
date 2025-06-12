@@ -185,7 +185,7 @@ exports.markMessagesAsRead = async (ticketId, userId, userType) => {
     senderType = ['user'];
   } else {
     // По умолчанию для совместимости со старым кодом
-    senderType = userType === 'requester' ? 'staff' : 'requester';
+    senderType = userType === 'requester' ? 'moderator' : 'requester';
   }
   
   // Находим сообщения, которые нужно отметить

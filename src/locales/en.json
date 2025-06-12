@@ -1,0 +1,75 @@
+{
+  "auth": {
+    "registrationDisabled": "Registration is disabled",
+    "emailPasswordRequired": "Email and password are required",
+    "invalidCredentials": "Invalid credentials",
+    "userNotFound": "User not found",
+    "invalidToken": "Invalid token",
+    "tokenExpired": "Token expired",
+    "noToken": "No token provided",
+    "accessDenied": "Access denied",
+    "insufficientPermissions": "Insufficient permissions"
+  },
+  "tickets": {
+    "notFound": "Ticket not found",
+    "createError": "Error creating ticket",
+    "updateError": "Error updating ticket",
+    "deleteError": "Error deleting ticket",
+    "accessDenied": "You don't have access to this ticket",
+    "invalidStatus": "Invalid status",
+    "invalidPriority": "Invalid priority",
+    "assignmentError": "Error assigning ticket",
+    "messageAddError": "Error adding message",
+    "fileUploadError": "Error uploading file",
+    "noteAddError": "Error adding note"
+  },
+  "users": {
+    "notFound": "User not found",
+    "createError": "Error creating user",
+    "updateError": "Error updating user",
+    "deleteError": "Error deleting user",
+    "emailExists": "User with this email already exists",
+    "invalidRole": "Invalid role",
+    "cannotDeleteSelf": "You cannot delete your own account",
+    "passwordResetError": "Error resetting password"
+  },
+  "validation": {
+    "required": "{{field}} is required",
+    "invalidEmail": "Invalid email address",
+    "invalidPhone": "Invalid phone number",
+    "minLength": "Minimum length for {{field}} is {{min}} characters",
+    "maxLength": "Maximum length for {{field}} is {{max}} characters",
+    "invalidFormat": "Invalid {{field}} format"
+  },
+  "email": {
+    "sendError": "Error sending email",
+    "templateError": "Email template error",
+    "subject": {
+      "newTicket": "New ticket #{{ticketId}}",
+      "ticketUpdate": "Ticket update #{{ticketId}}",
+      "ticketMessage": "New message in ticket #{{ticketId}}",
+      "passwordReset": "Password reset"
+    }
+  },
+  "common": {
+    "serverError": "Internal server error",
+    "badRequest": "Bad request",
+    "unauthorized": "Unauthorized",
+    "forbidden": "Forbidden",
+    "notFound": "Not found",
+    "success": "Success",
+    "error": "Error",
+    "warning": "Warning",
+    "info": "Information"
+  },
+  "chat": {
+    "connectionError": "Chat connection error",
+    "messageError": "Message send error",
+    "unauthorized": "Unauthorized for chat"
+  },
+  "statistics": {
+    "fetchError": "Error fetching statistics",
+    "invalidPeriod": "Invalid period",
+    "noData": "No data to display"
+  }
+}

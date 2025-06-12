@@ -45,36 +45,24 @@ const upload = multer({
   }
 });
 
-// Middleware заглушка для разработки (должен быть заменен на authenticateJWT в продакшене)
-const devAuth = (req, res, next) => {
-  // TODO: В продакшене замените на authenticateJWT
-  // Временная заглушка для разработки
-  req.user = {
-    id: 1,
-    email: 'dev@localhost',
-    role: 'staff'
-  };
-  next();
-};
-
 // Маршруты для работы с сообщениями
-// Получение сообщений заявки
-router.get('/tickets/:ticketId/messages', messageController.getTicketMessages);
+// Получение сообщений заявки - доступно всем авторизованным
+router.get('/tickets/:ticketId/messages', authenticateJWT, messageController.getTicketMessages);
 
-// Добавление сообщения - используйте auth в продакшене
-router.post('/tickets/:ticketId/messages', devAuth, messageController.addMessage);
+// Добавление сообщения - доступно всем авторизованным
+router.post('/tickets/:ticketId/messages', authenticateJWT, messageController.addMessage);
 
-// Отметка сообщений как прочитанных
-router.put('/tickets/:ticketId/messages/read', devAuth, messageController.markMessagesAsRead);
+// Отметка сообщений как прочитанных - доступно всем авторизованным
+router.put('/tickets/:ticketId/messages/read', authenticateJWT, messageController.markMessagesAsRead);
 
-// Загрузка вложения
-router.post('/tickets/:ticketId/attachments', devAuth, upload.single('file'), messageController.uploadAttachment);
+// Загрузка вложения - доступно всем авторизованным
+router.post('/tickets/:ticketId/attachments', authenticateJWT, upload.single('file'), messageController.uploadAttachment);
 
-// Обновление статуса сообщения
-router.put('/:messageId/status', devAuth, messageController.updateMessageStatus);
+// Обновление статуса сообщения - доступно всем авторизованным
+router.put('/:messageId/status', authenticateJWT, messageController.updateMessageStatus);
 
-// Получение непрочитанных сообщений
-router.get('/unread', devAuth, messageController.getUnreadMessages);
+// Получение непрочитанных сообщений - доступно всем авторизованным
+router.get('/unread', authenticateJWT, messageController.getUnreadMessages);
 
 
 

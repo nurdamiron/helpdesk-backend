@@ -90,3 +90,6 @@ pids
 *.pid
 *.seed
 *.pid.lock
+# Telegram bot lock file
+.telegram-bot.lock
+src/services/telegramBot/.telegram-bot.lock

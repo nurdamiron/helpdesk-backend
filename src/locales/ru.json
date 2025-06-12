@@ -1,0 +1,75 @@
+{
+  "auth": {
+    "registrationDisabled": "Регистрация отключена",
+    "emailPasswordRequired": "Email и пароль обязательны",
+    "invalidCredentials": "Неверные учетные данные",
+    "userNotFound": "Пользователь не найден",
+    "invalidToken": "Недействительный токен",
+    "tokenExpired": "Токен истек",
+    "noToken": "Токен не предоставлен",
+    "accessDenied": "Доступ запрещен",
+    "insufficientPermissions": "Недостаточно прав"
+  },
+  "tickets": {
+    "notFound": "Заявка не найдена",
+    "createError": "Ошибка при создании заявки",
+    "updateError": "Ошибка при обновлении заявки",
+    "deleteError": "Ошибка при удалении заявки",
+    "accessDenied": "У вас нет доступа к этой заявке",
+    "invalidStatus": "Недопустимый статус",
+    "invalidPriority": "Недопустимый приоритет",
+    "assignmentError": "Ошибка при назначении заявки",
+    "messageAddError": "Ошибка при добавлении сообщения",
+    "fileUploadError": "Ошибка при загрузке файла",
+    "noteAddError": "Ошибка при добавлении заметки"
+  },
+  "users": {
+    "notFound": "Пользователь не найден",
+    "createError": "Ошибка при создании пользователя",
+    "updateError": "Ошибка при обновлении пользователя",
+    "deleteError": "Ошибка при удалении пользователя",
+    "emailExists": "Пользователь с таким email уже существует",
+    "invalidRole": "Недопустимая роль",
+    "cannotDeleteSelf": "Вы не можете удалить свой аккаунт",
+    "passwordResetError": "Ошибка при сбросе пароля"
+  },
+  "validation": {
+    "required": "Поле {{field}} обязательно",
+    "invalidEmail": "Недействительный email адрес",
+    "invalidPhone": "Недействительный номер телефона",
+    "minLength": "Минимальная длина {{field}} - {{min}} символов",
+    "maxLength": "Максимальная длина {{field}} - {{max}} символов",
+    "invalidFormat": "Неверный формат {{field}}"
+  },
+  "email": {
+    "sendError": "Ошибка при отправке email",
+    "templateError": "Ошибка шаблона email",
+    "subject": {
+      "newTicket": "Новая заявка #{{ticketId}}",
+      "ticketUpdate": "Обновление заявки #{{ticketId}}",
+      "ticketMessage": "Новое сообщение в заявке #{{ticketId}}",
+      "passwordReset": "Сброс пароля"
+    }
+  },
+  "common": {
+    "serverError": "Внутренняя ошибка сервера",
+    "badRequest": "Неверный запрос",
+    "unauthorized": "Не авторизован",
+    "forbidden": "Доступ запрещен",
+    "notFound": "Не найдено",
+    "success": "Успешно",
+    "error": "Ошибка",
+    "warning": "Предупреждение",
+    "info": "Информация"
+  },
+  "chat": {
+    "connectionError": "Ошибка подключения к чату",
+    "messageError": "Ошибка отправки сообщения",
+    "unauthorized": "Не авторизован для чата"
+  },
+  "statistics": {
+    "fetchError": "Ошибка при получении статистики",
+    "invalidPeriod": "Недопустимый период",
+    "noData": "Нет данных для отображения"
+  }
+}

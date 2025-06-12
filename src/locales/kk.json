@@ -1,0 +1,75 @@
+{
+  "auth": {
+    "registrationDisabled": "Тіркеу өшірілген",
+    "emailPasswordRequired": "Email және құпия сөз міндетті",
+    "invalidCredentials": "Жарамсыз тіркелгі деректері",
+    "userNotFound": "Пайдаланушы табылмады",
+    "invalidToken": "Жарамсыз токен",
+    "tokenExpired": "Токен мерзімі өтті",
+    "noToken": "Токен берілмеген",
+    "accessDenied": "Қатынау тыйым салынған",
+    "insufficientPermissions": "Құқықтар жеткіліксіз"
+  },
+  "tickets": {
+    "notFound": "Өтінім табылмады",
+    "createError": "Өтінім жасау кезінде қате",
+    "updateError": "Өтінімді жаңарту кезінде қате",
+    "deleteError": "Өтінімді жою кезінде қате",
+    "accessDenied": "Сізде бұл өтінімге қатынау жоқ",
+    "invalidStatus": "Жарамсыз мәртебе",
+    "invalidPriority": "Жарамсыз басымдылық",
+    "assignmentError": "Өтінімді тағайындау кезінде қате",
+    "messageAddError": "Хабарлама қосу кезінде қате",
+    "fileUploadError": "Файл жүктеу кезінде қате",
+    "noteAddError": "Ескертпе қосу кезінде қате"
+  },
+  "users": {
+    "notFound": "Пайдаланушы табылмады",
+    "createError": "Пайдаланушы жасау кезінде қате",
+    "updateError": "Пайдаланушыны жаңарту кезінде қате",
+    "deleteError": "Пайдаланушыны жою кезінде қате",
+    "emailExists": "Мұндай email бар пайдаланушы тіркелген",
+    "invalidRole": "Жарамсыз рөл",
+    "cannotDeleteSelf": "Өз тіркелгіңізді жоя алмайсыз",
+    "passwordResetError": "Құпия сөзді қалпына келтіру кезінде қате"
+  },
+  "validation": {
+    "required": "{{field}} міндетті",
+    "invalidEmail": "Жарамсыз email мекенжайы",
+    "invalidPhone": "Жарамсыз телефон нөмірі",
+    "minLength": "{{field}} минималды ұзындығы - {{min}} таңба",
+    "maxLength": "{{field}} максималды ұзындығы - {{max}} таңба",
+    "invalidFormat": "{{field}} форматы жарамсыз"
+  },
+  "email": {
+    "sendError": "Email жіберу кезінде қате",
+    "templateError": "Email үлгісі қатесі",
+    "subject": {
+      "newTicket": "Жаңа өтінім #{{ticketId}}",
+      "ticketUpdate": "Өтінім жаңартылды #{{ticketId}}",
+      "ticketMessage": "Өтінімде жаңа хабарлама #{{ticketId}}",
+      "passwordReset": "Құпия сөзді қалпына келтіру"
+    }
+  },
+  "common": {
+    "serverError": "Сервердің ішкі қатесі",
+    "badRequest": "Жарамсыз сұрау",
+    "unauthorized": "Авторизацияланбаған",
+    "forbidden": "Қатынау тыйым салынған",
+    "notFound": "Табылмады",
+    "success": "Сәтті",
+    "error": "Қате",
+    "warning": "Ескерту",
+    "info": "Ақпарат"
+  },
+  "chat": {
+    "connectionError": "Чатқа қосылу қатесі",
+    "messageError": "Хабарлама жіберу қатесі",
+    "unauthorized": "Чат үшін авторизацияланбаған"
+  },
+  "statistics": {
+    "fetchError": "Статистиканы алу кезінде қате",
+    "invalidPeriod": "Жарамсыз кезең",
+    "noData": "Көрсетілетін деректер жоқ"
+  }
+}

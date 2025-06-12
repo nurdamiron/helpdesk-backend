@@ -12,7 +12,7 @@ const authController = {
   register: async (req, res) => {
     return res.status(403).json({ 
       status: 'error',
-      error: 'Регистрация отключена. Обратитесь к администратору для получения доступа.' 
+      error: req.t('auth.registrationDisabled')
     });
   },
 
@@ -26,7 +26,7 @@ const authController = {
         console.log('Login failed: Email and password are required');
         return res.status(400).json({ 
           status: 'error',
-          error: 'Email и пароль обязательны' 
+          error: req.t('auth.emailPasswordRequired')
         });
       }
 
@@ -39,7 +39,7 @@ const authController = {
         console.log('Login failed: User not found');
         return res.status(401).json({ 
           status: 'error',
-          error: 'Неверные учетные данные' 
+          error: req.t('auth.invalidCredentials')
         });
       }
 
@@ -63,7 +63,7 @@ const authController = {
         console.log('Login failed: Password mismatch');
         return res.status(401).json({ 
           status: 'error',
-          error: 'Неверные учетные данные' 
+          error: req.t('auth.invalidCredentials')
         });
       }
       
@@ -72,7 +72,7 @@ const authController = {
         console.log('Login failed: User account is inactive', user.id);
         return res.status(403).json({ 
           status: 'error', 
-          error: 'Учетная запись неактивна. Обратитесь к администратору.' 
+          error: req.t('auth.accessDenied')
         });
       }
       
@@ -102,10 +102,10 @@ const authController = {
         }
       });
     } catch (error) {
-      console.error('Ошибка входа:', error);
+      console.error('Login error:', error);
       return res.status(500).json({
         status: 'error',
-        error: 'Внутренняя ошибка сервера'
+        error: req.t('common.serverError')
       });
     }
   },
@@ -117,7 +117,7 @@ const authController = {
       if (!req.user) {
         return res.status(401).json({
           status: 'error',
-          error: 'Необходима аутентификация'
+          error: req.t('common.unauthorized')
         });
       }
       
@@ -138,7 +138,7 @@ const authController = {
       if (users.length === 0) {
         return res.status(404).json({
           status: 'error',
-          error: 'Пользователь не найден'
+          error: req.t('users.notFound')
         });
       }
       
@@ -147,10 +147,10 @@ const authController = {
         user: users[0]
       });
     } catch (error) {
-      console.error('Ошибка получения данных пользователя:', error);
+      console.error('Error getting user data:', error);
       return res.status(500).json({
         status: 'error',
-        error: 'Внутренняя ошибка сервера'
+        error: req.t('common.serverError')
       });
     }
   },
@@ -160,7 +160,7 @@ const authController = {
     // Просто отправляем успешный ответ, т.к. мы не используем сессии на сервере
     return res.json({
       status: 'success',
-      message: 'Выход выполнен успешно'
+      message: req.t('common.success')
     });
   },
   
@@ -173,7 +173,7 @@ const authController = {
       return res.json(users);
     } catch (error) {
       console.error('Error fetching users:', error);
-      res.status(500).json({ error: 'Ошибка при получении списка пользователей' });
+      res.status(500).json({ error: req.t('users.createError') });
     }
   },
   
@@ -187,13 +187,13 @@ const authController = {
       );
       
       if (rows.length === 0) {
-        return res.status(404).json({ error: 'Пользователь не найден' });
+        return res.status(404).json({ error: req.t('users.notFound') });
       }
       
       return res.json(rows[0]);
     } catch (error) {
       console.error('Error fetching user:', error);
-      res.status(500).json({ error: 'Ошибка при получении данных пользователя' });
+      res.status(500).json({ error: req.t('users.createError') });
     }
   },
   
@@ -205,7 +205,7 @@ const authController = {
 
       const [ex] = await pool.query('SELECT id FROM users WHERE id=?', [id]);
       if (!ex.length) {
-        return res.status(404).json({ error: 'Пользователь не найден' });
+        return res.status(404).json({ error: req.t('users.notFound') });
       }
 
       // Если передан password, пишем его "как есть"
@@ -217,7 +217,7 @@ const authController = {
       }
 
       // Проверяем допустимость роли
-      const validRoles = ['admin', 'support', 'manager', 'user', 'moderator']; // Включаем все возможные роли
+      const validRoles = ['admin', 'moderator', 'user'];
       const userRole = role && validRoles.includes(role) ? role : null;
 
       // Преобразуем статус активности в булево значение
@@ -248,12 +248,12 @@ const authController = {
       );
 
       return res.json({ 
-        message: 'Пользователь обновлён',
+        message: req.t('common.success'),
         user: updatedUser[0]
       });
     } catch (error) {
       console.error('Error updateUser:', error);
-      res.status(500).json({ error: 'Ошибка при обновлении' });
+      res.status(500).json({ error: req.t('users.updateError') });
     }
   },
   
@@ -263,12 +263,12 @@ const authController = {
       const { id } = req.params;
       const [del] = await pool.query('DELETE FROM users WHERE id=?', [id]);
       if (!del.affectedRows) {
-        return res.status(404).json({ error: 'Пользователь не найден' });
+        return res.status(404).json({ error: req.t('users.notFound') });
       }
-      return res.json({ message: 'Пользователь удалён' });
+      return res.json({ message: req.t('common.success') });
     } catch (error) {
       console.error('Error deleteUser:', error);
-      res.status(500).json({ error: 'Ошибка при удалении' });
+      res.status(500).json({ error: req.t('users.deleteError') });
     }
   }
 };

@@ -9,18 +9,18 @@ const { authenticateJWT, isAdmin } = require('../middleware/auth');
 router.post('/', employeeController.createEmployee);
 
 // Получение списка сотрудников - только для авторизованных админов
-router.get('/', employeeController.getEmployees);
+router.get('/', authenticateJWT, isAdmin, employeeController.getEmployees);
 
 // Получение статистики по сотрудникам - только для авторизованных админов
-router.get('/stats/summary', employeeController.getEmployeeStats);
+router.get('/stats/summary', authenticateJWT, isAdmin, employeeController.getEmployeeStats);
 
 // Получение сотрудника по ID - только для авторизованных админов
-router.get('/:id', employeeController.getEmployeeById);
+router.get('/:id', authenticateJWT, isAdmin, employeeController.getEmployeeById);
 
 // Обновление сотрудника - только для авторизованных админов
-router.put('/:id', employeeController.updateEmployee);
+router.put('/:id', authenticateJWT, isAdmin, employeeController.updateEmployee);
 
 // Удаление сотрудника - только для авторизованных админов
-router.delete('/:id', employeeController.deleteEmployee);
+router.delete('/:id', authenticateJWT, isAdmin, employeeController.deleteEmployee);
 
 module.exports = router;

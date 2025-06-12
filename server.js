@@ -4,7 +4,7 @@ const http = require('http');
 const app = require('./src/index');
 const pool = require('./src/config/database');
 const net = require('net');
-const HelpdeskTelegramBot = require('./src/services/telegramBot/bot');
+const telegramBotSingleton = require('./src/services/telegramBot/singleton');
 
 /**
  * Порт для запуска сервера
@@ -122,14 +122,32 @@ async function startServer() {
       console.log(`Environment: ${process.env.NODE_ENV}`);
       console.log(`Time: ${new Date().toISOString()}`);
       
-      // Инициализация Telegram бота
+      // Инициализация Telegram бота через синглтон
       if (process.env.TELEGRAM_BOT_TOKEN) {
-        try {
-          const telegramBot = new HelpdeskTelegramBot();
-          console.log('✅ Telegram bot initialized successfully');
-        } catch (error) {
-          console.error('❌ Failed to initialize Telegram bot:', error.message);
-        }
+        // Используем setImmediate для асинхронной инициализации после запуска сервера
+        setImmediate(async () => {
+          try {
+            // Проверяем информацию о текущем состоянии синглтона
+            const instanceInfo = telegramBotSingleton.getInstanceInfo();
+            console.log('📊 Состояние Telegram бота:', instanceInfo);
+            
+            if (instanceInfo.hasInstance) {
+              console.log('✅ Telegram бот уже запущен');
+              return;
+            }
+            
+            console.log('🤖 Инициализация Telegram бота через синглтон...');
+            await telegramBotSingleton.getInstance();
+            
+          } catch (initError) {
+            console.error('❌ Ошибка инициализации Telegram бота:', initError.message);
+            
+            // Если ошибка связана с блокировкой, не пытаемся повторно
+            if (initError.message.includes('блокировку')) {
+              console.log('⚠️ Другой процесс уже запускает бота');
+            }
+          }
+        });
       } else {
         console.warn('⚠️  TELEGRAM_BOT_TOKEN not set, Telegram bot is disabled');
       }
@@ -159,9 +177,36 @@ async function startServer() {
 function setupProcessHandlers(server) {
   // Обработчик сигнала завершения
   // Аяқтау сигналын өңдеуші
-  process.on('SIGTERM', () => {
+  process.on('SIGTERM', async () => {
     console.log('SIGTERM received. Shutting down gracefully...');
     console.log('SIGTERM алынды. Серверді дұрыс жабамыз...');
+    
+    // Останавливаем Telegram бота перед завершением сервера
+    try {
+      await telegramBotSingleton.destroy();
+    } catch (error) {
+      console.error('Ошибка при остановке Telegram бота:', error.message);
+    }
+    
+    server.close(() => {
+      console.log('Process terminated');
+      console.log('Процесс аяқталды');
+      process.exit(0);
+    });
+  });
+
+  // Обработчик сигнала прерывания (Ctrl+C)
+  process.on('SIGINT', async () => {
+    console.log('\nSIGINT received. Shutting down gracefully...');
+    console.log('SIGINT алынды. Серверді дұрыс жабамыз...');
+    
+    // Останавливаем Telegram бота перед завершением сервера
+    try {
+      await telegramBotSingleton.destroy();
+    } catch (error) {
+      console.error('Ошибка при остановке Telegram бота:', error.message);
+    }
+    
     server.close(() => {
       console.log('Process terminated');
       console.log('Процесс аяқталды');

@@ -39,9 +39,9 @@ const STATUS_MAP = {
 };
 
 const TYPE_MAP = {
-  'incident': 'Инцидент', 
   'support_request': 'Запрос',
-  'complaint': 'Жалоба'
+  'complaint': 'Жалоба', 
+  'incident': 'Инцидент'
 };
 
 const PROPERTY_TYPE_MAP = {
@@ -232,17 +232,21 @@ exports.getTickets = async (req, res) => {
 
     console.log('Current user:', req.user);
     
-    // Если пользователь не админ и не модератор, показываем только его заявки
-    if (req.user && (req.user.role === 'user' || req.user.role === undefined)) {
+    // Определяем, какие заявки показывать в зависимости от роли
+    const isAdminOrModerator = req.user && ['admin', 'moderator'].includes(req.user.role);
+    
+    if (req.user && !isAdminOrModerator) {
+      // Обычные пользователи видят только свои заявки
       console.log('Filtering tickets for user ID:', req.user.id);
       query += ' AND t.user_id = ?';
       params.push(req.user.id);
-    } else if (user_id) {
+    } else if (user_id && isAdminOrModerator) {
       // Если передан user_id и пользователь имеет права (админ или модератор), фильтруем по нему
-      console.log('Filtering tickets by provided user_id:', user_id);
+      console.log('Admin/Moderator filtering tickets by provided user_id:', user_id);
       query += ' AND t.user_id = ?';
       params.push(user_id);
-    } else {
+    } else if (isAdminOrModerator) {
+      // Админы и модераторы видят все заявки
       console.log('Showing all tickets (admin/moderator view)');
     }
 
@@ -275,10 +279,12 @@ exports.getTickets = async (req, res) => {
     let countQuery = 'SELECT COUNT(*) as total FROM tickets t WHERE 1=1';
     const countParams = [];
 
-    if (req.user && (req.user.role === 'user' || req.user.role === undefined)) {
+    if (req.user && !isAdminOrModerator) {
+      // Обычные пользователи видят только свои заявки
       countQuery += ' AND t.user_id = ?';
       countParams.push(req.user.id);
-    } else if (user_id) {
+    } else if (user_id && isAdminOrModerator) {
+      // Фильтрация по конкретному пользователю для админов и модераторов
       countQuery += ' AND t.user_id = ?';
       countParams.push(user_id);
     }
@@ -485,7 +491,7 @@ exports.updateTicket = async (req, res) => {
     // Обновляем метаданные с новым типом, если он передан
     const updatedMetadata = {
       ...currentMetadata,
-      ...(metadata.additional || {}),
+      ...(metadata && metadata.additional ? metadata.additional : {}),
     };
     
     if (type !== undefined) {
@@ -526,7 +532,7 @@ exports.updateTicket = async (req, res) => {
     updateValues.push(JSON.stringify(updatedMetadata));
 
     // Если пришли новые данные о заявителе, обновляем requester_metadata
-    if (metadata.requester || metadata.employee) {
+    if (metadata && (metadata.requester || metadata.employee)) {
       const requesterData = metadata.requester || metadata.employee || {};
       updateFields.push('requester_metadata = ?');
       updateValues.push(JSON.stringify(requesterData));
@@ -600,7 +606,7 @@ exports.updateTicket = async (req, res) => {
 exports.addMessage = async (req, res) => {
   try {
     const { id } = req.params;
-    const { content, sender_type = 'staff', content_type = 'text', sender_id } = req.body;
+    const { content, sender_type = 'moderator', content_type = 'text', sender_id } = req.body;
 
     if (!content) {
       return res.status(400).json({ error: 'Содержание сообщения обязательно' });
@@ -697,7 +703,7 @@ exports.uploadAttachment = async (req, res) => {
 exports.getTicketsAnalytics = async (req, res) => {
   try {
     // Проверяем роль пользователя - только модераторы и админы имеют доступ
-    if (!req.user || !['admin', 'moderator', 'manager', 'support'].includes(req.user.role)) {
+    if (!req.user || !['admin', 'moderator'].includes(req.user.role)) {
       return res.status(403).json({
         status: 'error',
         error: 'У вас нет доступа к этой функции'

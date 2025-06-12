@@ -7,18 +7,190 @@ class HelpdeskTelegramBot {
     this.token = process.env.TELEGRAM_BOT_TOKEN;
     if (!this.token) {
       console.error('❌ TELEGRAM_BOT_TOKEN не установлен в переменных окружения');
-      return;
+      throw new Error('TELEGRAM_BOT_TOKEN is not set');
     }
     
-    this.bot = new TelegramBot(this.token, { polling: true });
-    this.userStates = new Map(); // Хранение состояний пользователей
+    // Инициализация свойств
+    this.bot = null;
+    this.isInitializing = true;
+    this.isRunning = false;
+    this.userStates = new Map();
     this.adminChatIds = [];
     this.moderatorChatIds = [];
+    this.instanceId = `bot-${process.pid}-${Date.now()}`;
+    this.retryCount = 0;
+    this.maxRetries = 3;
     
-    this.setupHandlers();
-    this.loadAdminList();
+    console.log(`🤖 Создание экземпляра Telegram бота (ID: ${this.instanceId})`);
     
-    console.log('✅ Telegram бот запущен успешно');
+    // Запускаем асинхронную инициализацию
+    this.init().catch(error => {
+      console.error('❌ Критическая ошибка инициализации бота:', error);
+      this.isInitializing = false;
+      this.isRunning = false;
+    });
+  }
+
+  async init() {
+    try {
+      console.log(`📍 Начало инициализации бота (ID: ${this.instanceId})`);
+      
+      // Используем webhook в продакшене, polling в разработке
+      const useWebhook = process.env.NODE_ENV === 'production' || process.env.USE_WEBHOOK === 'true';
+      
+      // Создаем экземпляр бота без автозапуска
+      if (useWebhook) {
+        this.bot = new TelegramBot(this.token, { webHook: false });
+      } else {
+        this.bot = new TelegramBot(this.token, { 
+          polling: false // Отключаем автозапуск
+        });
+      }
+      
+      // Сохраняем ссылку на глобальный объект
+      global.telegramBot = this;
+      
+      // Настраиваем обработчики
+      this.setupHandlers();
+      
+      // Загружаем список администраторов
+      await this.loadAdminList();
+      
+      // Запускаем бота в зависимости от режима
+      if (useWebhook) {
+        await this.setupWebhook();
+      } else {
+        await this.startPollingWithRetry();
+      }
+      
+      // Устанавливаем флаги успешной инициализации
+      this.isInitializing = false;
+      this.isRunning = true;
+      
+      console.log(`✅ Бот инициализирован успешно (ID: ${this.instanceId})`);
+      
+    } catch (error) {
+      console.error(`❌ Ошибка инициализации бота (ID: ${this.instanceId}):`, error);
+      this.isInitializing = false;
+      this.isRunning = false;
+      throw error;
+    }
+  }
+
+  async startPollingWithRetry() {
+    let retryCount = 0;
+    const maxRetries = 3;
+    const baseDelay = 20000; // 20 секунд базовая задержка
+    
+    while (retryCount < maxRetries) {
+      try {
+        console.log(`🔄 Попытка ${retryCount + 1}/${maxRetries} запуска polling...`);
+        
+        // Очищаем предыдущие соединения
+        await this.clearPreviousConnections();
+        
+        // Дополнительная задержка между попытками
+        if (retryCount > 0) {
+          const delay = baseDelay + (retryCount * 10000);
+          console.log(`⏳ Ожидание ${delay / 1000} секунд перед следующей попыткой...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+        }
+        
+        // Запускаем polling
+        await this.bot.startPolling({
+          restart: true,
+          polling: {
+            interval: 2000,
+            params: {
+              timeout: 30,
+              allowed_updates: ["message", "callback_query", "inline_query"]
+            }
+          }
+        });
+        
+        console.log(`✅ Telegram бот запущен успешно в режиме polling (ID: ${this.instanceId})`);
+        return; // Успешный запуск
+        
+      } catch (error) {
+        retryCount++;
+        console.error(`❌ Ошибка запуска (попытка ${retryCount}/${maxRetries}):`, error.message);
+        
+        if (error.message.includes('409') || error.message.includes('Conflict')) {
+          console.log('⚠️ Обнаружен конфликт с другим экземпляром бота');
+          
+          // Принудительная очистка
+          await this.forceClearTelegramApi();
+          
+          if (retryCount >= maxRetries) {
+            throw new Error(`Не удалось запустить бот после ${maxRetries} попыток из-за конфликта`);
+          }
+        } else {
+          // Для других ошибок меньшая задержка
+          await new Promise(resolve => setTimeout(resolve, 5000));
+          
+          if (retryCount >= maxRetries) {
+            throw error;
+          }
+        }
+      }
+    }
+  }
+
+  async setupWebhook() {
+    try {
+      const webhookUrl = `${process.env.WEBHOOK_URL || 'https://your-domain.com'}/api/telegram/webhook`;
+      await this.bot.setWebHook(webhookUrl);
+      console.log('✅ Telegram webhook настроен успешно:', webhookUrl);
+      this.isInitializing = false;
+    } catch (error) {
+      console.error('❌ Ошибка настройки webhook:', error.message);
+      this.isInitializing = false;
+      throw error;
+    }
+  }
+
+  async clearPreviousConnections() {
+    try {
+      // Удаляем webhook если он установлен
+      await this.bot.deleteWebHook();
+      console.log('🧹 Webhook удален');
+      
+      // Небольшая пауза
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    } catch (error) {
+      console.log('⚠️ Ошибка при удалении webhook (это нормально):', error.message);
+    }
+  }
+
+  async forceClearTelegramApi() {
+    try {
+      console.log('🔧 Принудительная очистка Telegram API...');
+      
+      // Создаем временный экземпляр для очистки
+      const tempBot = new TelegramBot(this.token, { polling: false, webHook: false });
+      
+      // Удаляем webhook
+      try {
+        await tempBot.deleteWebHook();
+        console.log('🧹 Webhook удален через временный бот');
+      } catch (e) {
+        console.log('⚠️ Webhook уже удален или не существует');
+      }
+      
+      // Получаем обновления для очистки очереди
+      try {
+        await tempBot.getUpdates({ offset: -1 });
+        console.log('🧹 Очередь обновлений очищена');
+      } catch (e) {
+        console.log('⚠️ Ошибка очистки очереди:', e.message);
+      }
+      
+      // Ждем перед следующей попыткой
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
+    } catch (error) {
+      console.error('❌ Ошибка принудительной очистки:', error.message);
+    }
   }
 
   setupHandlers() {
@@ -123,8 +295,15 @@ _Выберите команду ниже:_`;
           { text: '🔍 Күйді тексеру / Проверить статус', callback_data: 'check_status' }
         ],
         [
+          { text: '🚨 Шұғыл / Срочная помощь', callback_data: 'urgent_help' },
+          { text: '📋 Жиі сұрақтар / FAQ', callback_data: 'faq' }
+        ],
+        [
           { text: '❓ Көмек / Помощь', callback_data: 'help' },
           { text: '☎️ Байланыс / Контакты', callback_data: 'contacts' }
+        ],
+        [
+          { text: '🌐 Веб-сайт / Веб-сайт', url: process.env.FRONTEND_URL || 'http://localhost:5173' }
         ]
       ]
     };
@@ -159,15 +338,36 @@ _Выберите команду ниже:_`;
       case 'check_status':
         await this.askForTicketId(chatId);
         break;
+      case 'urgent_help':
+        await this.showUrgentHelp(chatId);
+        break;
+      case 'faq':
+        await this.showFAQ(chatId);
+        break;
       case 'help':
         await this.showHelp(chatId);
         break;
       case 'contacts':
         await this.showContacts(chatId);
         break;
+      case 'main_menu':
+        await this.handleStart(query.message, []);
+        break;
+      case 'urgent_ticket':
+        await this.startUrgentTicketCreation(chatId);
+        break;
+      case 'ask_question':
+        await this.startQuestionMode(chatId);
+        break;
       default:
         if (data.startsWith('priority_')) {
           await this.selectPriority(chatId, data.replace('priority_', ''));
+        } else if (data.startsWith('type_')) {
+          await this.selectType(chatId, data.replace('type_', ''));
+        } else if (data.startsWith('reply_')) {
+          await this.handleReplyCallback(query);
+        } else if (data.startsWith('status_')) {
+          await this.handleStatusCallback(query);
         }
     }
   }
@@ -175,7 +375,7 @@ _Выберите команду ниже:_`;
   // Начало создания заявки
   async startTicketCreation(chatId) {
     this.userStates.set(chatId, {
-      step: 'awaiting_name',
+      step: 'awaiting_subject',
       ticketData: {}
     });
 
@@ -185,9 +385,94 @@ _Выберите команду ниже:_`;
 Сұрақтарға жауап беріңіз:
 _Пожалуйста, ответьте на вопросы:_
 
-1️⃣ *Аты-жөніңіз / Ваше ФИО:*`;
+1️⃣ *Өтініш тақырыбын жазыңыз / Укажите тему заявки:*
+_Мысалы / Например: "Принтер жұмыс істемейді" / "Не работает принтер"_`;
 
-    await this.bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '❌ Жабу / Отменить', callback_data: 'main_menu' }
+        ]
+      ]
+    };
+
+    await this.bot.sendMessage(chatId, text, { 
+      parse_mode: 'Markdown',
+      reply_markup: keyboard
+    });
+  }
+
+  // Создание срочной заявки
+  async startUrgentTicketCreation(chatId) {
+    this.userStates.set(chatId, {
+      step: 'awaiting_subject',
+      ticketData: { priority: 'urgent' }
+    });
+
+    const text = `
+🚨 *ШҰҒЫЛ ӨТІНІШ / СРОЧНАЯ ЗАЯВКА*
+
+⚠️ *Назарағар / Внимание:* Бұл шұғыл көмек үшін / Это для срочной помощи
+
+Сұрақтарға жауап беріңіз:
+_Пожалуйста, ответьте на вопросы:_
+
+1️⃣ *Не болды? Мәселені қысқаша жазыңыз / Что случилось? Кратко опишите проблему:*`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '📞 Қоңырау шалу / Позвонить', url: 'tel:+77770131838' }
+        ],
+        [
+          { text: '❌ Жабу / Отменить', callback_data: 'main_menu' }
+        ]
+      ]
+    };
+
+    await this.bot.sendMessage(chatId, text, { 
+      parse_mode: 'Markdown',
+      reply_markup: keyboard
+    });
+  }
+
+  // Режим быстрых вопросов
+  async startQuestionMode(chatId) {
+    this.userStates.set(chatId, {
+      step: 'awaiting_question',
+      mode: 'question'
+    });
+
+    const text = `
+💬 *СҰРАҚ ҚОЮ / ЗАДАТЬ ВОПРОС*
+
+Сіздің сұрағыңызды жазыңыз, біз тез жауап береміз:
+_Напишите ваш вопрос, мы быстро ответим:_
+
+📝 *Мысалдар / Примеры:*
+• "Принтер жұмыс істемейді" / "Принтер не работает"
+• "Интернет баяу" / "Интернет медленный"  
+• "Компьютер қосылмайды" / "Компьютер не включается"
+• "Құпия сөзді ұмыттым" / "Забыл пароль"
+
+_Немесе дереу қоңырау шалыңыз:_
+_Или позвоните прямо сейчас:_`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '📞 Дереу қоңырау / Позвонить сейчас', url: 'tel:+77770131838' }
+        ],
+        [
+          { text: '❌ Жабу / Отменить', callback_data: 'main_menu' }
+        ]
+      ]
+    };
+
+    await this.bot.sendMessage(chatId, text, { 
+      parse_mode: 'Markdown',
+      reply_markup: keyboard
+    });
   }
 
   // Обработка сообщений в зависимости от состояния
@@ -203,10 +488,41 @@ _Пожалуйста, ответьте на вопросы:_
     }
 
     switch (userState.step) {
+      case 'awaiting_question':
+        if (userState.mode === 'question') {
+          await this.handleQuickQuestion(chatId, text, msg.from.id);
+          return;
+        }
+        break;
+
+      case 'awaiting_subject':
+        userState.ticketData.subject = text;
+        userState.step = 'awaiting_description';
+        await this.bot.sendMessage(chatId, '2️⃣ *Мәселені толық сипаттаңыз / Подробно опишите проблему:*', { parse_mode: 'Markdown' });
+        break;
+
+      case 'awaiting_description':
+        userState.ticketData.description = text;
+        userState.step = 'awaiting_name';
+        
+        const keyboard = {
+          inline_keyboard: [
+            [
+              { text: '❌ Жабу / Отменить', callback_data: 'main_menu' }
+            ]
+          ]
+        };
+        
+        await this.bot.sendMessage(chatId, '3️⃣ *Аты-жөніңіз / Ваше ФИО:*', { 
+          parse_mode: 'Markdown',
+          reply_markup: keyboard
+        });
+        break;
+
       case 'awaiting_name':
         userState.ticketData.name = text;
         userState.step = 'awaiting_email';
-        await this.bot.sendMessage(chatId, '2️⃣ *Email мекенжайыңыз / Ваш email:*', { parse_mode: 'Markdown' });
+        await this.bot.sendMessage(chatId, '4️⃣ *Email мекенжайыңыз / Ваш email:*', { parse_mode: 'Markdown' });
         break;
 
       case 'awaiting_email':
@@ -216,27 +532,26 @@ _Пожалуйста, ответьте на вопросы:_
         }
         userState.ticketData.email = text;
         userState.step = 'awaiting_phone';
-        await this.bot.sendMessage(chatId, '3️⃣ *Телефон нөміріңіз / Ваш телефон:*\n_(міндетті емес / необязательно - жіберу үшін "-" енгізіңіз / введите "-" чтобы пропустить)_', { parse_mode: 'Markdown' });
+        await this.bot.sendMessage(chatId, '5️⃣ *Телефон нөміріңіз / Ваш телефон:*\n_(міндетті емес / необязательно - жіберу үшін "-" енгізіңіз / введите "-" чтобы пропустить)_', { parse_mode: 'Markdown' });
         break;
 
       case 'awaiting_phone':
         if (text !== '-' && text !== 'жоқ' && text !== 'нет') {
           userState.ticketData.phone = text;
         }
-        userState.step = 'awaiting_subject';
-        await this.bot.sendMessage(chatId, '4️⃣ *Өтініш тақырыбы / Тема заявки:*', { parse_mode: 'Markdown' });
+        userState.step = 'awaiting_type';
+        await this.showTypeSelection(chatId);
         break;
 
-      case 'awaiting_subject':
-        userState.ticketData.subject = text;
-        userState.step = 'awaiting_description';
-        await this.bot.sendMessage(chatId, '5️⃣ *Мәселені толық сипаттаңыз / Подробно опишите проблему:*', { parse_mode: 'Markdown' });
+
+      case 'replying':
+        // Пользователь отвечает на сообщение от поддержки
+        await this.processUserReply(chatId, text, userState.ticketId);
         break;
 
-      case 'awaiting_description':
-        userState.ticketData.description = text;
-        userState.step = 'awaiting_priority';
-        await this.showPrioritySelection(chatId);
+      case 'admin_replying':
+        // Администратор отвечает пользователю
+        await this.processAdminReply(chatId, text, userState.ticketId, userState.adminId, userState.adminName);
         break;
 
       case 'awaiting_confirmation':
@@ -257,38 +572,36 @@ _Пожалуйста, ответьте на вопросы:_
     this.userStates.set(chatId, userState);
   }
 
-  // Показ категорий
-  async showCategorySelection(chatId) {
-    const categories = [
-      { id: 'it_support', name: '🆘 IT қолдау / IT поддержка' },
-      { id: 'equipment_issue', name: '🔧 Құрылғы мәселесі / Проблемы с оборудованием' },
-      { id: 'software_issue', name: '🖥️ БҚ мәселесі / Проблемы с ПО' },
-      { id: 'access_request', name: '🔐 Рұқсат сұрау / Запрос доступа' },
-      { id: 'other', name: '📋 Басқа / Другое' }
+  // Показ типов заявок
+  async showTypeSelection(chatId) {
+    const types = [
+      { id: 'support_request', name: '🔧 Сұрау / Запрос' },
+      { id: 'complaint', name: '📋 Шағым / Жалоба' },
+      { id: 'incident', name: '🚨 Инцидент / Инцидент' }
     ];
 
     const keyboard = {
-      inline_keyboard: categories.map(cat => [{
-        text: cat.name,
-        callback_data: `category_${cat.id}`
+      inline_keyboard: types.map(type => [{
+        text: type.name,
+        callback_data: `type_${type.id}`
       }])
     };
 
-    await this.bot.sendMessage(chatId, '4️⃣ *Категорияны таңдаңыз / Выберите категорию:*', {
+    await this.bot.sendMessage(chatId, '6️⃣ *Өтініш түрін таңдаңыз / Выберите тип заявки:*', {
       parse_mode: 'Markdown',
       reply_markup: keyboard
     });
   }
 
-  // Выбор категории
-  async selectCategory(chatId, categoryId) {
+  // Выбор типа заявки
+  async selectType(chatId, typeId) {
     const userState = this.userStates.get(chatId);
     if (!userState) return;
 
-    userState.ticketData.category = categoryId;
-    userState.step = 'awaiting_subject';
+    userState.ticketData.type = typeId;
+    userState.step = 'awaiting_priority';
     
-    await this.bot.sendMessage(chatId, '5️⃣ *Өтініш тақырыбы / Тема заявки:*', { parse_mode: 'Markdown' });
+    await this.showPrioritySelection(chatId);
   }
 
   // Показ приоритетов
@@ -307,7 +620,7 @@ _Пожалуйста, ответьте на вопросы:_
       }])
     };
 
-    await this.bot.sendMessage(chatId, '6️⃣ *Басымдылық / Приоритет:*', {
+    await this.bot.sendMessage(chatId, '7️⃣ *Басымдылық / Приоритет:*', {
       parse_mode: 'Markdown',
       reply_markup: keyboard
     });
@@ -333,6 +646,7 @@ _Пожалуйста, ответьте на вопросы:_
 📧 *Email:* ${ticketData.email}
 📱 *Телефон:* ${ticketData.phone || 'Көрсетілмеген / Не указан'}
 📋 *Тақырып / Тема:* ${ticketData.subject}
+🏷️ *Түрі / Тип:* ${this.getTypeName(ticketData.type)}
 📝 *Сипаттама / Описание:* 
 ${ticketData.description}
 ⚡ *Басымдылық / Приоритет:* ${this.getPriorityName(ticketData.priority)}
@@ -353,7 +667,7 @@ ${ticketData.description}
         [
           ticketData.subject,
           ticketData.description,
-          'support_request',
+          ticketData.type || 'support_request',
           ticketData.priority,
           'new',
           JSON.stringify({
@@ -476,6 +790,122 @@ _Если потребуется дополнительная информаци
     return data;
   }
 
+  // Обработка быстрого вопроса
+  async handleQuickQuestion(chatId, questionText, telegramUserId) {
+    try {
+      // Создаем заявку с типом "вопрос"
+      const [result] = await pool.query(
+        `INSERT INTO tickets (subject, description, type, priority, status, metadata, requester_metadata) 
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [
+          `Сұрақ / Вопрос: ${questionText.substring(0, 50)}...`,
+          questionText,
+          'support_request',
+          'medium',
+          'new',
+          JSON.stringify({
+            source: 'telegram_question',
+            telegram_chat_id: chatId,
+            telegram_user_id: telegramUserId,
+            quick_question: true
+          }),
+          JSON.stringify({
+            name: `Telegram User ${telegramUserId}`,
+            telegram_username: `@telegram_user_${telegramUserId}`
+          })
+        ]
+      );
+
+      const ticketId = result.insertId;
+
+      // Уведомляем пользователя
+      const confirmMessage = `
+💬 *Сұрағыңыз қабылданды / Ваш вопрос принят!*
+
+🎫 *Өтініш нөмірі / Номер заявки:* #${ticketId}
+
+📝 *Сұрағыңыз / Ваш вопрос:*
+${questionText}
+
+⏱️ *Орташа жауап уақыты / Среднее время ответа:* 30 минут - 2 сағат / часа
+
+_Біз сізбен тез арада байланысамыз_
+_Мы свяжемся с вами в ближайшее время_`;
+
+      const keyboard = {
+        inline_keyboard: [
+          [
+            { text: '📊 Күйді көру / Статус', callback_data: `status_${ticketId}` }
+          ],
+          [
+            { text: '💬 Басқа сұрақ / Другой вопрос', callback_data: 'ask_question' },
+            { text: '🏠 Басты мәзір / Главное меню', callback_data: 'main_menu' }
+          ]
+        ]
+      };
+
+      await this.bot.sendMessage(chatId, confirmMessage, { 
+        parse_mode: 'Markdown',
+        reply_markup: keyboard
+      });
+
+      // Уведомляем администраторов
+      await this.notifyAdminsQuickQuestion(ticketId, questionText, telegramUserId);
+
+      // Очищаем состояние
+      this.userStates.delete(chatId);
+
+    } catch (error) {
+      console.error('Ошибка обработки быстрого вопроса:', error);
+      await this.bot.sendMessage(chatId, '❌ Қате пайда болды / Произошла ошибка');
+    }
+  }
+
+  // Уведомление администраторов о быстром вопросе
+  async notifyAdminsQuickQuestion(ticketId, questionText, telegramUserId) {
+    try {
+      const message = `
+💬 *ЖЫЛДАМ СҰРАҚ / БЫСТРЫЙ ВОПРОС #${ticketId}*
+
+👤 *Пайдаланушы / Пользователь:* Telegram User ${telegramUserId}
+📱 *Көзі / Источник:* Telegram (Быстрый вопрос)
+
+❓ *Сұрақ / Вопрос:*
+${questionText}
+
+⚡ *Бұл жылдам сұрақ - тез жауап күтеді*
+*Это быстрый вопрос - ожидает быстрого ответа*`;
+
+      const keyboard = {
+        inline_keyboard: [
+          [
+            { text: '💬 Жауап беру / Ответить', callback_data: `admin_reply_${ticketId}` },
+            { text: '👁 Қарау / Просмотреть', callback_data: `admin_view_${ticketId}` }
+          ],
+          [
+            { text: '✋ Қабылдау / Принять', callback_data: `admin_take_${ticketId}` }
+          ]
+        ]
+      };
+
+      // Отправляем всем администраторам
+      const allAdmins = [...this.adminChatIds, ...this.moderatorChatIds];
+      
+      for (const chatId of allAdmins) {
+        try {
+          await this.bot.sendMessage(chatId, message, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
+          });
+        } catch (error) {
+          console.error(`Не удалось отправить уведомление админу ${chatId}:`, error.message);
+        }
+      }
+    } catch (error) {
+      console.error('Ошибка уведомления админов о быстром вопросе:', error);
+    }
+  }
+
   // Создание заявки из распарсенных данных
   async createTicketFromParsedData(chatId, ticketData, telegramUserId) {
     try {
@@ -512,7 +942,7 @@ _Если потребуется дополнительная информаци
           [
             ticketData.subject || 'Заявка из Telegram',
             ticketData.description || ticketData.subject,
-            'support_request',
+            ticketData.type || 'support_request',
             ticketData.priority || 'medium',
             'new',
             JSON.stringify({
@@ -624,6 +1054,10 @@ ${ticket.description}
     } else if (data.startsWith('admin_take_')) {
       const ticketId = data.replace('admin_take_', '');
       await this.assignTicketToAdmin(chatId, ticketId, adminId);
+      
+    } else if (data.startsWith('admin_reply_')) {
+      const ticketId = data.replace('admin_reply_', '');
+      await this.startAdminReply(chatId, ticketId, adminId);
     }
   }
 
@@ -767,6 +1201,52 @@ _Мы свяжемся с вами в ближайшее время_`;
       }
     } catch (error) {
       console.error('Ошибка уведомления пользователя:', error);
+    }
+  }
+
+  // Начать ответ администратора на заявку
+  async startAdminReply(chatId, ticketId, adminTelegramId) {
+    try {
+      // Проверяем, является ли пользователь администратором
+      const [adminUser] = await pool.query(
+        'SELECT id, first_name, last_name, role FROM users WHERE telegram_chat_id = ?',
+        [adminTelegramId]
+      );
+
+      if (adminUser.length === 0 || !['admin', 'moderator', 'staff'].includes(adminUser[0].role)) {
+        await this.bot.sendMessage(chatId, '❌ Сізде бұл әрекетті орындауға рұқсат жоқ / У вас нет прав для этого действия');
+        return;
+      }
+
+      // Устанавливаем состояние для ответа администратора
+      this.userStates.set(chatId, {
+        step: 'admin_replying',
+        ticketId: ticketId,
+        adminId: adminUser[0].id,
+        adminName: `${adminUser[0].first_name} ${adminUser[0].last_name}`
+      });
+
+      const replyMessage = `
+💬 *Өтініш #${ticketId} үшін жауап / Ответ на заявку #${ticketId}*
+
+Пайдаланушыға жіберетін хабарламаңызды жазыңыз:
+_Напишите сообщение для отправки пользователю:_
+
+📝 *Кеңестер / Советы:*
+• Анық және түсінікті болыңыз / Будьте четкими и понятными
+• Қосымша ақпарат сұраңыз / Запросите дополнительную информацию
+• Шешімді ұсыныңыз / Предложите решение
+
+Болдырмау үшін /cancel командасын пайдаланыңыз
+_Для отмены используйте команду /cancel_`;
+
+      await this.bot.sendMessage(chatId, replyMessage, { 
+        parse_mode: 'Markdown' 
+      });
+
+    } catch (error) {
+      console.error('Ошибка начала ответа администратора:', error);
+      await this.bot.sendMessage(chatId, '❌ Қате пайда болды / Произошла ошибка');
     }
   }
 
@@ -963,7 +1443,126 @@ it-support@alataustroyinvest.kz
 Қазақстан, Алматы қ., Қ.Әзірбаев к., 161б
 Казахстан, г. Алматы, ул. К. Азербаева, 161б`;
 
-    await this.bot.sendMessage(chatId, contactsText, { parse_mode: 'Markdown' });
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '📞 Дереу қоңырау шалу / Позвонить сейчас', url: 'tel:+77770131838' }
+        ],
+        [
+          { text: '📧 Email жіберу / Отправить Email', url: 'mailto:it-support@alataustroyinvest.kz' }
+        ],
+        [
+          { text: '🏠 Басты мәзір / Главное меню', callback_data: 'main_menu' }
+        ]
+      ]
+    };
+
+    await this.bot.sendMessage(chatId, contactsText, { 
+      parse_mode: 'Markdown',
+      reply_markup: keyboard
+    });
+  }
+
+  // Срочная помощь
+  async showUrgentHelp(chatId) {
+    const urgentText = `
+🚨 *ШҰҒЫЛ КӨМЕК / СРОЧНАЯ ПОМОЩЬ*
+
+🔴 *Мына жағдайларда дереу қоңырау шалыңыз / Звоните немедленно:*
+
+🔥 *Өрт қауіпті жағдай / Пожароопасная ситуация*
+📞 101 немесе / или +7 (777) 013-1838
+
+⚡ *Электр жүйесі апатты / Авария электросети*
+📞 Энергосбыт: 180
+📞 Аварийная служба: +7 (777) 013-1838
+
+💧 *Сантехника апаты / Авария водопровода*
+📞 Водоканал: 109
+📞 Аварийная служба: +7 (777) 013-1838
+
+🖥️ *Маңызды жүйелер істемейді / Критические системы не работают*
+📞 IT поддержка 24/7: +7 (777) 013-1838
+
+🏢 *Ғимарат қауіпсіздігі / Безопасность здания*
+📞 Охрана: +7 (727) 355-00-00
+
+⚠️ *Басқа апаттық жағдайлар / Другие аварийные ситуации*
+📞 +7 (777) 013-1838
+
+_Басқа мәселелер үшін қарапайым өтініш жасаңыз_
+_Для остальных проблем создайте обычную заявку_`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '🚨 Шұғыл өтініш / Срочная заявка', callback_data: 'urgent_ticket' }
+        ],
+        [
+          { text: '📞 IT Қолдау / IT Поддержка', url: 'tel:+77770131838' },
+          { text: '🏢 Офис / Офис', url: 'tel:+77273550000' }
+        ],
+        [
+          { text: '🏠 Басты мәзір / Главное меню', callback_data: 'main_menu' }
+        ]
+      ]
+    };
+
+    await this.bot.sendMessage(chatId, urgentText, { 
+      parse_mode: 'Markdown',
+      reply_markup: keyboard
+    });
+  }
+
+  // FAQ - Часто задаваемые вопросы
+  async showFAQ(chatId) {
+    const faqText = `
+📋 *ЖИІ ҚОЙЫЛАТЫН СҰРАҚТАР / ЧАСТО ЗАДАВАЕМЫЕ ВОПРОСЫ*
+
+❓ *Компьютер қосылмайды / Компьютер не включается*
+🔸 Қуат кабелін тексеріңіз / Проверьте кабель питания
+🔸 Қосқышты басып көріңіз / Попробуйте нажать кнопку питания
+🔸 UPS қосылғанын тексеріңіз / Проверьте подключение UPS
+
+❓ *Интернет жұмыс істемейді / Интернет не работает*
+🔸 Wi-Fi қосылғанын тексеріңіз / Проверьте подключение Wi-Fi
+🔸 Роутерді қайта қосыңыз / Перезагрузите роутер
+🔸 Кабель қосылуын тексеріңіз / Проверьте подключение кабеля
+
+❓ *Принтер басып шығармайды / Принтер не печатает*
+🔸 Қағаз бар ма тексеріңіз / Проверьте наличие бумаги
+🔸 Сия картриджін тексеріңіз / Проверьте картридж
+🔸 Принтерді қайта қосыңыз / Перезагрузите принтер
+
+❓ *Құпия сөзді ұмыттым / Забыл пароль*
+🔸 IT қызметіне хабарласыңыз / Обратитесь в IT службу
+🔸 Өтініш жасаңыз / Создайте заявку
+🔸 Жеке куәлігіңізді дайындаңыз / Подготовьте удостоверение
+
+❓ *Файлдар жоғалды / Файлы пропали*
+🔸 Корзинаны тексеріңіз / Проверьте корзину
+🔸 OneDrive/облакты тексеріңіз / Проверьте OneDrive/облако
+🔸 Дереу IT-ге хабарласыңыз / Немедленно обратитесь в IT`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '🔍 Мәселені таба алмадым / Не нашел проблему', callback_data: 'new_ticket' }
+        ],
+        [
+          { text: '💬 Сұрақ қою / Задать вопрос', callback_data: 'ask_question' },
+          { text: '📞 Қоңырау шалу / Позвонить', url: 'tel:+77770131838' }
+        ],
+        [
+          { text: '🏠 Басты мәзір / Главное меню', callback_data: 'main_menu' }
+        ]
+      ]
+    };
+
+    await this.bot.sendMessage(chatId, faqText, { 
+      parse_mode: 'Markdown',
+      reply_markup: keyboard
+    });
   }
 
   // Запрос ID заявки
@@ -1166,6 +1765,15 @@ _Жаңартылды / Обновлено:_ ${new Date().toLocaleString('kk-KZ'
     return priorities[priorityId] || priorityId;
   }
 
+  getTypeName(typeId) {
+    const types = {
+      'support_request': 'Сұрау / Запрос',
+      'complaint': 'Шағым / Жалоба',
+      'incident': 'Инцидент / Инцидент'
+    };
+    return types[typeId] || typeId;
+  }
+
   getStatusName(statusId) {
     const statuses = {
       'new': 'Жаңа / Новая',
@@ -1183,6 +1791,640 @@ _Жаңартылды / Обновлено:_ ${new Date().toLocaleString('kk-KZ'
   isAdmin(chatId) {
     return this.adminChatIds.includes(chatId.toString()) || 
            this.moderatorChatIds.includes(chatId.toString());
+  }
+
+  // Методы для отправки сообщений пользователям через Telegram
+  async sendMessageToUser(ticketId, message, fromStaff = true) {
+    try {
+      // Получаем информацию о заявке и Telegram chat_id пользователя
+      const [tickets] = await pool.query(
+        `SELECT t.*, JSON_EXTRACT(t.metadata, '$.telegram_chat_id') as telegram_chat_id
+         FROM tickets t 
+         WHERE t.id = ?`,
+        [ticketId]
+      );
+
+      if (tickets.length === 0) {
+        throw new Error(`Ticket #${ticketId} not found`);
+      }
+
+      const ticket = tickets[0];
+      const chatId = ticket.telegram_chat_id;
+
+      if (!chatId) {
+        throw new Error(`No Telegram chat_id found for ticket #${ticketId}`);
+      }
+
+      // Формируем сообщение
+      const staffPrefix = fromStaff ? '👨‍💼 *Қолдау қызметі / Служба поддержки:*\n\n' : '';
+      const ticketInfo = `\n\n📋 *Өтініш / Заявка:* #${ticketId}`;
+      
+      const fullMessage = `${staffPrefix}${message}${ticketInfo}`;
+
+      // Создаем кнопки для ответа
+      const keyboard = {
+        inline_keyboard: [
+          [
+            { text: '💬 Жауап беру / Ответить', callback_data: `reply_${ticketId}` }
+          ],
+          [
+            { text: '📊 Күйді көру / Статус', callback_data: `status_${ticketId}` },
+            { text: '📋 Менің өтініштерім / Мои заявки', callback_data: 'my_tickets' }
+          ]
+        ]
+      };
+
+      await this.bot.sendMessage(chatId, fullMessage, {
+        parse_mode: 'Markdown',
+        reply_markup: keyboard
+      });
+
+      return true;
+    } catch (error) {
+      console.error('Error sending message to user via Telegram:', error);
+      throw error;
+    }
+  }
+
+  // Уведомление об изменении статуса заявки
+  async notifyStatusChange(ticketId, newStatus, comment = '') {
+    try {
+      const statusEmoji = {
+        'new': '🆕',
+        'in_progress': '⏳',
+        'pending': '⏸️',
+        'resolved': '✅',
+        'closed': '🔒'
+      };
+
+      const statusText = this.getStatusName(newStatus);
+      const emoji = statusEmoji[newStatus] || '📋';
+      
+      let message = `${emoji} *Өтініш күйі өзгерді / Статус заявки изменен*\n\n`;
+      message += `📊 *Жаңа күй / Новый статус:* ${statusText}`;
+      
+      if (comment) {
+        message += `\n\n💬 *Комментарий:*\n${comment}`;
+      }
+
+      await this.sendMessageToUser(ticketId, message, true);
+    } catch (error) {
+      console.error('Error notifying status change:', error);
+    }
+  }
+
+  // Уведомление о новом сообщении от сотрудника
+  async notifyNewMessage(ticketId, messageText, staffName = '') {
+    try {
+      const staffInfo = staffName ? ` (${staffName})` : '';
+      let message = `💬 *Жаңа хабарлама / Новое сообщение*${staffInfo}\n\n`;
+      message += messageText;
+
+      await this.sendMessageToUser(ticketId, message, true);
+    } catch (error) {
+      console.error('Error notifying new message:', error);
+    }
+  }
+
+  // Обработка ответов пользователей на сообщения
+  async handleReplyCallback(query) {
+    const chatId = query.message.chat.id;
+    const ticketId = query.data.replace('reply_', '');
+    
+    await this.bot.answerCallbackQuery(query.id);
+    
+    // Устанавливаем состояние для ответа
+    this.userStates.set(chatId, {
+      state: 'replying',
+      ticketId: ticketId,
+      step: 'message'
+    });
+
+    const replyMessage = `
+💬 *Өтініш #${ticketId} үшін жауап / Ответ на заявку #${ticketId}*
+
+Сіздің хабарламаңызды жазыңыз:
+_Напишите ваше сообщение:_
+
+Болдырмау үшін /cancel командасын пайдаланыңыз
+_Для отмены используйте команду /cancel_`;
+
+    await this.bot.sendMessage(chatId, replyMessage, { parse_mode: 'Markdown' });
+  }
+
+  // Обработка статуса заявки из кнопки
+  async handleStatusCallback(query) {
+    const chatId = query.message.chat.id;
+    const ticketId = query.data.replace('status_', '');
+    
+    await this.bot.answerCallbackQuery(query.id);
+    await this.checkTicketStatus(chatId, ticketId);
+  }
+
+  // Обработка ответа пользователя
+  async processUserReply(chatId, messageText, ticketId) {
+    try {
+      // Получаем информацию о пользователе
+      const [userData] = await pool.query(
+        'SELECT first_name, last_name FROM users WHERE telegram_chat_id = ?',
+        [chatId]
+      );
+
+      const userName = userData.length > 0 
+        ? `${userData[0].first_name || ''} ${userData[0].last_name || ''}`.trim()
+        : 'Telegram User';
+
+      // Сохраняем сообщение в БД
+      await pool.query(
+        `INSERT INTO ticket_messages (ticket_id, sender_type, message, metadata) 
+         VALUES (?, ?, ?, ?)`,
+        [
+          ticketId,
+          'user',
+          messageText,
+          JSON.stringify({
+            source: 'telegram',
+            telegram_chat_id: chatId,
+            sender_name: userName
+          })
+        ]
+      );
+
+      // Обновляем дату последнего обновления заявки
+      await pool.query(
+        'UPDATE tickets SET updated_at = NOW() WHERE id = ?',
+        [ticketId]
+      );
+
+      // Уведомляем администраторов о новом сообщении
+      await this.notifyAdminsUserReply(ticketId, messageText, userName);
+
+      // Подтверждаем получение сообщения
+      const confirmMessage = `
+✅ *Сіздің хабарламаңыз жіберілді / Ваше сообщение отправлено*
+
+📋 *Өтініш / Заявка:* #${ticketId}
+💬 *Хабарлама / Сообщение:* ${messageText.length > 100 ? messageText.substring(0, 100) + '...' : messageText}
+
+Біз сізбен жақын арада байланысамыз.
+_Мы свяжемся с вами в ближайшее время._`;
+
+      await this.bot.sendMessage(chatId, confirmMessage, { parse_mode: 'Markdown' });
+
+      // Очищаем состояние пользователя
+      this.userStates.delete(chatId);
+
+    } catch (error) {
+      console.error('Error processing user reply:', error);
+      await this.bot.sendMessage(chatId, '❌ Қате пайда болды / Произошла ошибка при отправке сообщения');
+    }
+  }
+
+  // Уведомление администраторов о новом сообщении от пользователя
+  async notifyAdminsUserReply(ticketId, messageText, userName) {
+    try {
+      const message = `
+💬 *ЖАҢА ХАБАРЛАМА / НОВОЕ СООБЩЕНИЕ*
+
+🎫 *Өтініш / Заявка:* #${ticketId}
+👤 *Пайдаланушы / Пользователь:* ${userName}
+
+📝 *Хабарлама / Сообщение:*
+${messageText}
+
+📲 *Көз / Источник:* Telegram`;
+
+      // Отправляем уведомления всем админам и модераторам
+      const allAdminChatIds = [...this.adminChatIds, ...this.moderatorChatIds];
+      
+      for (const adminChatId of allAdminChatIds) {
+        try {
+          const keyboard = {
+            inline_keyboard: [
+              [
+                { text: '💬 Жауап беру / Ответить', callback_data: `admin_reply_${ticketId}` },
+                { text: '📋 Өтініш / Заявка', callback_data: `admin_view_${ticketId}` }
+              ]
+            ]
+          };
+
+          await this.bot.sendMessage(adminChatId, message, {
+            parse_mode: 'Markdown',
+            reply_markup: keyboard
+          });
+        } catch (error) {
+          console.error(`Error sending notification to admin ${adminChatId}:`, error);
+        }
+      }
+    } catch (error) {
+      console.error('Error notifying admins about user reply:', error);
+    }
+  }
+
+  // Обработка ответа администратора пользователю
+  async processAdminReply(chatId, messageText, ticketId, adminId, adminName) {
+    try {
+      // Сохраняем сообщение в БД
+      await pool.query(
+        `INSERT INTO ticket_messages (ticket_id, sender_type, sender_id, message, metadata) 
+         VALUES (?, ?, ?, ?, ?)`,
+        [
+          ticketId,
+          'staff',
+          adminId,
+          messageText,
+          JSON.stringify({
+            source: 'telegram_admin',
+            telegram_chat_id: chatId,
+            sender_name: adminName
+          })
+        ]
+      );
+
+      // Обновляем дату последнего обновления заявки
+      await pool.query(
+        'UPDATE tickets SET updated_at = NOW() WHERE id = ?',
+        [ticketId]
+      );
+
+      // Отправляем сообщение пользователю через Telegram
+      await this.sendMessageToUser(ticketId, messageText, true);
+
+      // Подтверждаем отправку администратору
+      const confirmMessage = `
+✅ *Хабарлама жіберілді / Сообщение отправлено*
+
+🎫 *Өтініш / Заявка:* #${ticketId}
+👤 *Қабылдаушы / Получатель:* Пользователь заявки
+💬 *Хабарлама / Сообщение:* ${messageText.length > 100 ? messageText.substring(0, 100) + '...' : messageText}
+
+📲 *Жіберілді / Отправлено через:* Telegram`;
+
+      await this.bot.sendMessage(chatId, confirmMessage, { 
+        parse_mode: 'Markdown' 
+      });
+
+      // Очищаем состояние администратора
+      this.userStates.delete(chatId);
+
+    } catch (error) {
+      console.error('Error processing admin reply:', error);
+      await this.bot.sendMessage(chatId, '❌ Қате пайда болды / Произошла ошибка при отправке сообщения');
+    }
+  }
+
+  // Подтверждение создания заявки
+  async confirmTicketCreation(chatId) {
+    const userState = this.userStates.get(chatId);
+    if (!userState || !userState.ticketData) {
+      await this.bot.sendMessage(chatId, '❌ Қате: деректер табылмады / Ошибка: данные не найдены');
+      return;
+    }
+
+    await this.createTicket(chatId, userState.ticketData, chatId);
+  }
+
+  // Отмена создания заявки
+  async cancelTicketCreation(chatId) {
+    this.userStates.delete(chatId);
+    
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '🏠 Басты мәзір / Главное меню', callback_data: 'main_menu' }
+        ]
+      ]
+    };
+    
+    await this.bot.sendMessage(chatId, '❌ Өтініш жасаудан бас тартылды / Создание заявки отменено', {
+      reply_markup: keyboard
+    });
+  }
+
+  // Редактирование заявки
+  async editTicket(chatId) {
+    const userState = this.userStates.get(chatId);
+    if (!userState || !userState.ticketData) {
+      await this.bot.sendMessage(chatId, '❌ Қате: деректер табылмады / Ошибка: данные не найдены');
+      return;
+    }
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '📝 Тақырып / Тема', callback_data: 'edit_subject' },
+          { text: '📄 Сипаттама / Описание', callback_data: 'edit_description' }
+        ],
+        [
+          { text: '👤 Аты-жөні / ФИО', callback_data: 'edit_name' },
+          { text: '📧 Email', callback_data: 'edit_email' }
+        ],
+        [
+          { text: '📱 Телефон', callback_data: 'edit_phone' },
+          { text: '⚡ Басымдылық / Приоритет', callback_data: 'edit_priority' }
+        ],
+        [
+          { text: '✅ Дайын / Готово', callback_data: 'confirm_ticket' }
+        ]
+      ]
+    };
+
+    await this.bot.sendMessage(chatId, '✏️ Не өзгерткіңіз келеді? / Что вы хотите изменить?', {
+      reply_markup: keyboard
+    });
+  }
+
+  // Показать мои заявки
+  async showMyTickets(chatId, telegramUserId) {
+    try {
+      // Получаем заявки пользователя
+      const [tickets] = await pool.query(
+        `SELECT id, subject, status, priority, created_at
+         FROM tickets 
+         WHERE JSON_EXTRACT(metadata, '$.telegram_chat_id') = ?
+         OR JSON_EXTRACT(metadata, '$.telegram_user_id') = ?
+         ORDER BY created_at DESC
+         LIMIT 10`,
+        [chatId, telegramUserId]
+      );
+
+      if (tickets.length === 0) {
+        const keyboard = {
+          inline_keyboard: [
+            [
+              { text: '📝 Жаңа өтініш / Новая заявка', callback_data: 'new_ticket' }
+            ],
+            [
+              { text: '🏠 Басты мәзір / Главное меню', callback_data: 'main_menu' }
+            ]
+          ]
+        };
+
+        await this.bot.sendMessage(chatId, 
+          '📭 Сізде әлі өтініштер жоқ / У вас пока нет заявок', 
+          { reply_markup: keyboard }
+        );
+        return;
+      }
+
+      let message = '📋 *Сіздің өтініштеріңіз / Ваши заявки:*\n\n';
+
+      const keyboard = {
+        inline_keyboard: []
+      };
+
+      tickets.forEach((ticket, index) => {
+        const statusEmoji = {
+          'new': '🆕',
+          'in_progress': '⏳',
+          'pending': '⏸️',
+          'resolved': '✅',
+          'closed': '🔒'
+        }[ticket.status] || '📋';
+
+        const priorityEmoji = {
+          'low': '🟢',
+          'medium': '🟡',
+          'high': '🟠',
+          'urgent': '🔴'
+        }[ticket.priority] || '⚪';
+
+        message += `${index + 1}. ${statusEmoji} *#${ticket.id}* - ${ticket.subject}\n`;
+        message += `   ${priorityEmoji} ${this.getStatusName(ticket.status)}\n`;
+        message += `   📅 ${new Date(ticket.created_at).toLocaleDateString('ru-RU')}\n\n`;
+
+        // Добавляем кнопку для каждой заявки
+        keyboard.inline_keyboard.push([{
+          text: `#${ticket.id} - ${ticket.subject.substring(0, 30)}${ticket.subject.length > 30 ? '...' : ''}`,
+          callback_data: `ticket_${ticket.id}`
+        }]);
+      });
+
+      // Добавляем навигационные кнопки
+      keyboard.inline_keyboard.push([
+        { text: '📝 Жаңа өтініш / Новая заявка', callback_data: 'new_ticket' }
+      ]);
+      keyboard.inline_keyboard.push([
+        { text: '🏠 Басты мәзір / Главное меню', callback_data: 'main_menu' }
+      ]);
+
+      await this.bot.sendMessage(chatId, message, {
+        parse_mode: 'Markdown',
+        reply_markup: keyboard
+      });
+
+    } catch (error) {
+      console.error('Ошибка получения заявок:', error);
+      await this.bot.sendMessage(chatId, '❌ Қате пайда болды / Произошла ошибка');
+    }
+  }
+
+  // Обработка действий с конкретной заявкой
+  async handleTicketAction(query) {
+    const chatId = query.message.chat.id;
+    const ticketId = query.data.replace('ticket_', '');
+    
+    await this.bot.answerCallbackQuery(query.id);
+
+    try {
+      // Получаем информацию о заявке
+      const [tickets] = await pool.query(
+        `SELECT * FROM tickets WHERE id = ?`,
+        [ticketId]
+      );
+
+      if (tickets.length === 0) {
+        await this.bot.sendMessage(chatId, '❌ Өтініш табылмады / Заявка не найдена');
+        return;
+      }
+
+      const ticket = tickets[0];
+      
+      const statusEmoji = {
+        'new': '🆕',
+        'in_progress': '⏳',
+        'pending': '⏸️',
+        'resolved': '✅',
+        'closed': '🔒'
+      }[ticket.status] || '📋';
+
+      const priorityEmoji = {
+        'low': '🟢',
+        'medium': '🟡',
+        'high': '🟠',
+        'urgent': '🔴'
+      }[ticket.priority] || '⚪';
+
+      let message = `📋 *Өтініш / Заявка #${ticket.id}*\n\n`;
+      message += `📝 *Тақырып / Тема:* ${ticket.subject}\n`;
+      message += `${statusEmoji} *Күйі / Статус:* ${this.getStatusName(ticket.status)}\n`;
+      message += `${priorityEmoji} *Басымдылық / Приоритет:* ${this.getPriorityName(ticket.priority)}\n`;
+      message += `📅 *Құрылған / Создана:* ${new Date(ticket.created_at).toLocaleString('ru-RU')}\n\n`;
+      message += `📄 *Сипаттама / Описание:*\n${ticket.description}`;
+
+      const keyboard = {
+        inline_keyboard: [
+          [
+            { text: '💬 Хабарлама қосу / Добавить сообщение', callback_data: `reply_${ticket.id}` }
+          ]
+        ]
+      };
+
+      // Добавляем кнопку закрытия если заявка решена
+      if (ticket.status === 'resolved') {
+        keyboard.inline_keyboard.push([
+          { text: '🔒 Жабу / Закрыть', callback_data: `close_${ticket.id}` }
+        ]);
+      }
+
+      keyboard.inline_keyboard.push([
+        { text: '🔙 Өтініштерге оралу / Вернуться к заявкам', callback_data: 'my_tickets' }
+      ]);
+
+      await this.bot.sendMessage(chatId, message, {
+        parse_mode: 'Markdown',
+        reply_markup: keyboard
+      });
+
+    } catch (error) {
+      console.error('Ошибка показа заявки:', error);
+      await this.bot.sendMessage(chatId, '❌ Қате пайда болды / Произошла ошибка');
+    }
+  }
+
+  // Запрос ID заявки для проверки статуса
+  async askForTicketId(chatId) {
+    this.userStates.set(chatId, {
+      step: 'awaiting_ticket_id'
+    });
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '❌ Болдырмау / Отменить', callback_data: 'main_menu' }
+        ]
+      ]
+    };
+
+    await this.bot.sendMessage(chatId, 
+      '🔍 *Өтініш нөмірін енгізіңіз / Введите номер заявки:*\n\n_Мысалы / Например: 123_', 
+      { 
+        parse_mode: 'Markdown',
+        reply_markup: keyboard
+      }
+    );
+  }
+
+  // Показать срочную помощь
+  async showUrgentHelp(chatId) {
+    const text = `
+🚨 *ШҰҒЫЛ КӨМЕК / СРОЧНАЯ ПОМОЩЬ*
+
+⚡ *Критикалық мәселелер үшін / Для критических проблем:*
+
+📞 *Тікелей қоңырау шалыңыз / Звоните напрямую:*
++7 (777) 013-18-38
+
+🕐 *Жұмыс уақыты / Рабочее время:*
+Дүйсенбі-Жұма / Пн-Пт: 09:00 - 18:00
+
+⚠️ *Шұғыл жағдайлар / Экстренные ситуации:*
+• Жүйенің толық істен шығуы / Полный отказ системы
+• Деректердің жоғалуы / Потеря данных
+• Кибершабуыл белгілері / Признаки кибератаки
+• Маңызды жабдықтың істен шығуы / Выход из строя критического оборудования
+
+💡 *Не істеу керек / Что делать:*
+1. Дереу қоңырау шалыңыз / Немедленно позвоните
+2. Мәселені қысқаша сипаттаңыз / Кратко опишите проблему
+3. Нұсқауларды орындаңыз / Следуйте инструкциям`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '📞 Қазір қоңырау шалу / Позвонить сейчас', url: 'tel:+77770131838' }
+        ],
+        [
+          { text: '🚨 Шұғыл өтініш жасау / Создать срочную заявку', callback_data: 'urgent_ticket' }
+        ],
+        [
+          { text: '🏠 Басты мәзір / Главное меню', callback_data: 'main_menu' }
+        ]
+      ]
+    };
+
+    await this.bot.sendMessage(chatId, text, {
+      parse_mode: 'Markdown',
+      reply_markup: keyboard
+    });
+  }
+
+  // Метод для корректного завершения работы бота
+  async shutdown() {
+    console.log(`🔄 Завершение работы Telegram бота (ID: ${this.instanceId})...`);
+    
+    // Устанавливаем флаг, что бот больше не работает
+    this.isRunning = false;
+    
+    try {
+      if (this.bot) {
+        // Останавливаем прием новых сообщений
+        console.log('🛑 Остановка обработки сообщений...');
+        this.bot.removeAllListeners();
+        
+        // Останавливаем поллинг
+        try {
+          console.log('🛑 Остановка поллинга...');
+          await this.bot.stopPolling();
+        } catch (e) {
+          console.log('⚠️ Поллинг уже остановлен или ошибка:', e.message);
+        }
+        
+        // Удаляем webhook
+        try {
+          console.log('🧹 Удаление webhook...');
+          await this.bot.deleteWebHook();
+        } catch (e) {
+          console.log('⚠️ Webhook уже удален или ошибка:', e.message);
+        }
+        
+        // Закрываем соединение
+        try {
+          console.log('🔌 Закрытие соединения...');
+          await this.bot.close();
+        } catch (e) {
+          console.log('⚠️ Ошибка закрытия соединения:', e.message);
+        }
+        
+        // Увеличенная задержка для полного закрытия соединений
+        console.log('⏳ Ожидание полного закрытия соединений (5 секунд)...');
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        
+        console.log(`✅ Telegram бот полностью остановлен (ID: ${this.instanceId})`);
+      }
+      
+      // Очищаем состояния
+      if (this.userStates) {
+        this.userStates.clear();
+      }
+      
+      // Очищаем глобальную ссылку
+      if (global.telegramBot === this) {
+        global.telegramBot = null;
+      }
+      
+      // Обнуляем ссылку на бота
+      this.bot = null;
+      
+    } catch (error) {
+      console.error(`❌ Ошибка при остановке Telegram бота (ID: ${this.instanceId}):`, error.message);
+      
+      // Принудительно очищаем все ссылки даже при ошибке
+      this.bot = null;
+      if (global.telegramBot === this) {
+        global.telegramBot = null;
+      }
+    }
   }
 }
 

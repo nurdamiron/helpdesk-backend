@@ -18,7 +18,7 @@ exports.createUser = async (req, res) => {
     }
 
     // Проверяем допустимость роли
-    const validRoles = ['admin', 'moderator', 'staff', 'user'];
+    const validRoles = ['admin', 'moderator', 'user'];
     const userRole = role && validRoles.includes(role) ? role : 'user';
     
     // По умолчанию пользователь активен
@@ -40,30 +40,8 @@ exports.createUser = async (req, res) => {
 
 exports.getUsers = async (req, res) => {
   try {
-    // Проверяем, существуют ли колонки position и is_active в таблице
-    const [columns] = await pool.query(`
-      SELECT COLUMN_NAME 
-      FROM INFORMATION_SCHEMA.COLUMNS 
-      WHERE TABLE_NAME = 'users' AND COLUMN_NAME IN ('position', 'is_active')
-    `);
-    
-    const hasPosition = columns.some(col => col.COLUMN_NAME === 'position');
-    const hasIsActive = columns.some(col => col.COLUMN_NAME === 'is_active');
-    
-    // Формируем запрос с учетом наличия или отсутствия колонок
-    let selectFields = [
-      'id', 'email', 'first_name', 'last_name', 'role', 'created_at'
-    ];
-    
-    if (hasPosition) {
-      selectFields.push('position');
-    }
-    
-    if (hasIsActive) {
-      selectFields.push('is_active');
-    }
-    
-    const selectQuery = `SELECT ${selectFields.join(', ')} FROM users ORDER BY id DESC`;
+    // Простой запрос с основными полями
+    const selectQuery = `SELECT id, email, first_name, last_name, role, created_at, is_active FROM users ORDER BY id DESC`;
     
     const [rows] = await pool.query(selectQuery);
     return res.json(rows);
@@ -73,42 +51,38 @@ exports.getUsers = async (req, res) => {
   }
 };
 
+exports.getCurrentUser = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    
+    // Простой запрос с существующими полями
+    const selectQuery = `SELECT id, email, first_name, last_name, role, is_active, created_at, phone_work, department, job_title FROM users WHERE id=?`;
+    
+    const [rows] = await pool.query(selectQuery, [userId]);
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Пользователь не найден' });
+    }
+    return res.json(rows[0]);
+  } catch (error) {
+    console.error('Error getCurrentUser:', error);
+    res.status(500).json({ error: 'Ошибка сервера' });
+  }
+};
+
 exports.getUserById = async (req, res) => {
   try {
     const { id } = req.params;
-    
-    // Проверяем, существуют ли колонки position, is_active, phone и phone_work в таблице
-    const [columns] = await pool.query(`
-      SELECT COLUMN_NAME 
-      FROM INFORMATION_SCHEMA.COLUMNS 
-      WHERE TABLE_NAME = 'users' AND COLUMN_NAME IN ('position', 'is_active', 'phone', 'phone_work')
-    `);
-    
-    const hasPosition = columns.some(col => col.COLUMN_NAME === 'position');
-    const hasIsActive = columns.some(col => col.COLUMN_NAME === 'is_active');
-    const hasPhone = columns.some(col => col.COLUMN_NAME === 'phone');
-    const hasPhoneWork = columns.some(col => col.COLUMN_NAME === 'phone_work');
-    
-    // Формируем запрос с учетом наличия или отсутствия колонок
-    let selectFields = [
-      'id', 'email', 'first_name', 'last_name', 'role', 'language', 'timezone', 'created_at'
-    ];
-    
-    if (hasPosition) {
-      selectFields.push('position');
+    const requestingUserId = req.user.id;
+    const requestingUserRole = req.user.role;
+
+    // Проверяем права доступа: пользователь может смотреть только свой профиль,
+    // админы и модераторы могут смотреть любые профили
+    if (requestingUserId != id && !['admin', 'moderator'].includes(requestingUserRole)) {
+      return res.status(403).json({ error: 'Доступ запрещен' });
     }
     
-    if (hasPhone) {
-      selectFields.push('phone');
-    } else if (hasPhoneWork) {
-      selectFields.push('phone_work as phone');
-    }
-    
-    if (hasIsActive) {
-      selectFields.push('is_active');
-    }
-    
-    const selectQuery = `SELECT ${selectFields.join(', ')} FROM users WHERE id=?`;
+    // Простой запрос с существующими полями
+    const selectQuery = `SELECT id, email, first_name, last_name, role, is_active, created_at, phone_work, department, job_title FROM users WHERE id=?`;
     
     const [rows] = await pool.query(selectQuery, [id]);
     if (!rows.length) {
@@ -125,6 +99,19 @@ exports.updateUser = async (req, res) => {
   try {
     const { id } = req.params;
     const { first_name, last_name, email, phone, role, is_active, position } = req.body;
+    const requestingUserId = req.user.id;
+    const requestingUserRole = req.user.role;
+
+    // Проверяем права доступа: пользователь может обновлять только свой профиль,
+    // админы и модераторы могут обновлять любые профили
+    if (requestingUserId != id && !['admin', 'moderator'].includes(requestingUserRole)) {
+      return res.status(403).json({ error: 'Доступ запрещен' });
+    }
+
+    // Обычные пользователи не могут изменять свою роль
+    if (requestingUserId == id && !['admin', 'moderator'].includes(requestingUserRole) && role && role !== req.user.role) {
+      return res.status(403).json({ error: 'Нельзя изменять собственную роль' });
+    }
 
     const [ex] = await pool.query('SELECT id FROM users WHERE id=?', [id]);
     if (!ex.length) {
@@ -140,95 +127,61 @@ exports.updateUser = async (req, res) => {
     }
 
     // Проверяем допустимость роли
-    const validRoles = ['admin', 'moderator', 'staff', 'user'];
+    const validRoles = ['admin', 'moderator', 'user'];
     const userRole = role && validRoles.includes(role) ? role : null;
     
     // Преобразуем статус активности в булево значение
     const activeStatus = is_active !== undefined ? (is_active ? 1 : 0) : null;
 
-    // Проверяем, существуют ли колонки position, is_active, phone и phone_work в таблице
-    const [columns] = await pool.query(`
-      SELECT COLUMN_NAME 
-      FROM INFORMATION_SCHEMA.COLUMNS 
-      WHERE TABLE_NAME = 'users' AND COLUMN_NAME IN ('position', 'is_active', 'phone', 'phone_work')
-    `);
+    // Формируем простой запрос для обновления
+    let updateFields = [];
+    let params = [];
     
-    const hasPosition = columns.some(col => col.COLUMN_NAME === 'position');
-    const hasIsActive = columns.some(col => col.COLUMN_NAME === 'is_active');
-    const hasPhone = columns.some(col => col.COLUMN_NAME === 'phone');
-    const hasPhoneWork = columns.some(col => col.COLUMN_NAME === 'phone_work');
-    
-    // Формируем базовый запрос для обновления
-    let updateFields = [
-      'first_name=COALESCE(?, first_name)',
-      'last_name=COALESCE(?, last_name)',
-      'email=COALESCE(?, email)',
-      'role=COALESCE(?, role)',
-      'updated_at=CURRENT_TIMESTAMP'
-    ];
-    
-    // Параметры для базового запроса
-    let params = [
-      first_name, 
-      last_name,
-      email,
-      userRole
-    ];
-    
-    // Добавляем position, если такая колонка существует
-    if (hasPosition) {
-      updateFields.push('position=COALESCE(?, position)');
-      params.push(position);
+    if (first_name !== undefined) {
+      updateFields.push('first_name = ?');
+      params.push(first_name);
     }
     
-    // Добавляем phone или phone_work, если существует
-    if (hasPhone && phone !== undefined) {
-      updateFields.push('phone=COALESCE(?, phone)');
-      params.push(phone);
-    } else if (hasPhoneWork && phone !== undefined) {
-      updateFields.push('phone_work=COALESCE(?, phone_work)');
-      params.push(phone);
+    if (last_name !== undefined) {
+      updateFields.push('last_name = ?');
+      params.push(last_name);
     }
     
-    // Добавляем is_active, если такая колонка существует
-    if (hasIsActive) {
-      updateFields.push('is_active=COALESCE(?, is_active)');
+    if (email !== undefined) {
+      updateFields.push('email = ?');
+      params.push(email);
+    }
+    
+    if (userRole !== null) {
+      updateFields.push('role = ?');
+      params.push(userRole);
+    }
+    
+    if (activeStatus !== null) {
+      updateFields.push('is_active = ?');
       params.push(activeStatus);
     }
     
-    // Добавляем id в параметры
+    if (phone !== undefined) {
+      updateFields.push('phone_work = ?');
+      params.push(phone);
+    }
+    
+    if (updateFields.length === 0) {
+      return res.status(400).json({ error: 'Нет данных для обновления' });
+    }
+    
+    updateFields.push('updated_at = CURRENT_TIMESTAMP');
     params.push(id);
     
     // Формируем окончательный запрос
-    const query = `
-      UPDATE users SET
-      ${updateFields.join(', ')}
-      WHERE id=?
-    `;
+    const query = `UPDATE users SET ${updateFields.join(', ')} WHERE id = ?`;
     
     await pool.query(query, params);
 
     // Получаем обновленные данные пользователя
-    // Формируем запрос с учетом наличия или отсутствия колонок
-    let selectFields = [
-      'id', 'email', 'first_name', 'last_name', 'role'
-    ];
-    
-    if (hasPosition) {
-      selectFields.push('position');
-    }
-    
-    if (hasPhone) {
-      selectFields.push('phone');
-    } else if (hasPhoneWork) {
-      selectFields.push('phone_work as phone');
-    }
-    
-    if (hasIsActive) {
-      selectFields.push('is_active');
-    }
-    
-    const selectQuery = `SELECT ${selectFields.join(', ')} FROM users WHERE id=?`;
+    // Всегда используем простой запрос для получения обновленных данных
+    const selectQuery = `SELECT id, email, first_name, last_name, role, is_active FROM users WHERE id=?`;
     
     const [updatedUser] = await pool.query(selectQuery, [id]);
 
@@ -246,20 +199,34 @@ exports.updatePassword = async (req, res) => {
   try {
     const { id } = req.params;
     const { currentPassword, newPassword } = req.body;
+    const requestingUserId = req.user.id;
+    const requestingUserRole = req.user.role;
 
-    if (!currentPassword || !newPassword) {
-      return res.status(400).json({ error: 'Текущий и новый пароли обязательны' });
+    // Проверяем права доступа: пользователь может изменять только свой пароль,
+    // админы могут изменять любые пароли (но без текущего пароля)
+    if (requestingUserId != id && requestingUserRole !== 'admin') {
+      return res.status(403).json({ error: 'Доступ запрещен' });
     }
 
-    // Проверяем существование пользователя и правильность текущего пароля
+    if (!newPassword) {
+      return res.status(400).json({ error: 'Новый пароль обязателен' });
+    }
+
+    // Проверяем существование пользователя
     const [user] = await pool.query('SELECT password FROM users WHERE id=?', [id]);
     
     if (!user.length) {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
 
-    if (user[0].password !== currentPassword) {
-      return res.status(401).json({ error: 'Неверный текущий пароль' });
+    // Для обычных пользователей проверяем текущий пароль
+    if (requestingUserId == id) {
+      if (!currentPassword) {
+        return res.status(400).json({ error: 'Текущий пароль обязателен' });
+      }
+      if (user[0].password !== currentPassword) {
+        return res.status(401).json({ error: 'Неверный текущий пароль' });
+      }
     }
 
     // Обновляем пароль
@@ -279,6 +246,14 @@ exports.updateSettings = async (req, res) => {
   try {
     const { id } = req.params;
     const { language, timezone, notifications, preferences } = req.body;
+    const requestingUserId = req.user.id;
+    const requestingUserRole = req.user.role;
+
+    // Проверяем права доступа: пользователь может изменять только свои настройки,
+    // админы и модераторы могут изменять любые настройки
+    if (requestingUserId != id && !['admin', 'moderator'].includes(requestingUserRole)) {
+      return res.status(403).json({ error: 'Доступ запрещен' });
+    }
 
     const [user] = await pool.query('SELECT id FROM users WHERE id=?', [id]);
     
@@ -286,25 +261,12 @@ exports.updateSettings = async (req, res) => {
       return res.status(404).json({ error: 'Пользователь не найден' });
     }
 
-    // Обновляем настройки пользователя
+    // Since we don't have language, timezone, or settings columns in the users table,
+    // we'll just update the timestamp for now
+    // In a real application, you would add these columns or use a separate settings table
     await pool.query(
-      `UPDATE users SET
-        language=COALESCE(?, language),
-        timezone=COALESCE(?, timezone),
-        settings=JSON_SET(
-          COALESCE(settings, '{}'),
-          '$.notifications', ?,
-          '$.preferences', ?
-        ),
-        updated_at=CURRENT_TIMESTAMP
-      WHERE id=?`,
-      [
-        language,
-        timezone,
-        JSON.stringify(notifications || {}),
-        JSON.stringify(preferences || {}),
-        id
-      ]
+      `UPDATE users SET updated_at=CURRENT_TIMESTAMP WHERE id=?`,
+      [id]
     );
 
     return res.json({ 

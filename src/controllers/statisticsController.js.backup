@@ -12,7 +12,7 @@ exports.getDashboardStats = async (req, res) => {
         SUM(CASE WHEN status = 'resolved' THEN 1 ELSE 0 END) as resolved,
         SUM(CASE WHEN status = 'closed' THEN 1 ELSE 0 END) as closed,
         SUM(CASE WHEN priority = 'urgent' THEN 1 ELSE 0 END) as urgent,
-        SUM(CASE WHEN priority = 'high' THEN 1 ELSE 0 END) as high_count,
+        SUM(CASE WHEN priority = 'high' THEN 1 ELSE 0 END) as `high_count`,
         SUM(CASE WHEN created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR) THEN 1 ELSE 0 END) as last_24h,
         SUM(CASE WHEN created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN 1 ELSE 0 END) as last_7days
       FROM tickets
@@ -36,9 +36,9 @@ exports.getDashboardStats = async (req, res) => {
     const [userStats] = await pool.query(`
       SELECT 
         COUNT(DISTINCT CASE WHEN role = 'admin' THEN id END) as admin_count,
-        COUNT(DISTINCT CASE WHEN role = 'moderator' THEN id END) as moderator_count,
+        COUNT(DISTINCT CASE WHEN role IN ('support', 'manager') THEN id END) as moderator_count,
         COUNT(DISTINCT CASE WHEN role = 'user' THEN id END) as user_count,
-        COUNT(DISTINCT CASE WHEN is_active = 1 THEN id END) as active_users
+        COUNT(DISTINCT CASE WHEN active = 1 THEN id END) as active_users
       FROM users
     `);
 
@@ -147,7 +147,7 @@ exports.getStaffPerformance = async (req, res) => {
         ) as resolution_rate
       FROM users u
       LEFT JOIN tickets t ON t.assigned_to = u.id
-      WHERE u.role IN ('admin', 'moderator')
+      WHERE u.role IN ('admin', 'support', 'manager')
       GROUP BY u.id, u.first_name, u.last_name, u.email
       ORDER BY assigned_tickets DESC
     `);
@@ -208,15 +208,15 @@ exports.getKPIMetrics = async (req, res) => {
     // Повторные обращения
     const [repeatTickets] = await pool.query(`
       SELECT 
-        COUNT(DISTINCT t1.user_id) as users_with_multiple_tickets,
+        COUNT(DISTINCT t1.employee_id) as users_with_multiple_tickets,
         COUNT(DISTINCT t2.id) as repeat_tickets
       FROM tickets t1
-      INNER JOIN tickets t2 ON t1.user_id = t2.user_id 
+      INNER JOIN tickets t2 ON t1.employee_id = t2.employee_id 
         AND t2.created_at > t1.created_at
         AND t2.created_at < DATE_ADD(t1.created_at, INTERVAL 7 DAY)
       WHERE t1.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-        AND t1.user_id IS NOT NULL
-        AND t2.user_id IS NOT NULL
+        AND t1.employee_id IS NOT NULL
+        AND t2.employee_id IS NOT NULL
     `);
 
     // Загруженность системы по часам
